@@ -1,4 +1,5 @@
-// Smoke test against the published site: loads, starts, throws with a real mouse drag, hides, no errors.
+// Smoke test against the published site: loads, starts, throws with a real mouse drag, hides,
+// then runs out to a trash can and digs. No errors allowed.
 import { launchBrowser } from './browser.mjs';
 
 const url = process.argv[2] || 'https://hambonesoftware.github.io/trash-panda-heist/';
@@ -20,7 +21,13 @@ await page.waitForFunction(() => window.TPH.info().throws === 1, null, { timeout
 await page.keyboard.down('Space');
 await page.waitForFunction(() => window.TPH.info().hide > 0.9, null, { timeout: 5000 });
 await page.keyboard.up('Space');
+await page.waitForFunction(() => window.TPH.info().hide < 0.05, null, { timeout: 5000 });
+// leave the slingshot, run to the first can and dig
+await page.keyboard.down('KeyA');
+await page.waitForFunction(() => window.TPH.info().where === 'roam' && window.TPH.info().x < -215, null, { timeout: 15000 });
+await page.keyboard.up('KeyA');
+await page.waitForFunction(() => window.TPH.info().sack >= 1 || window.TPH.info().hearts < 3, null, { timeout: 15000 });
 const info = await page.evaluate(() => window.TPH.info());
-console.log(JSON.stringify({ url, throws: info.throws, state: info.state, errors }));
+console.log(JSON.stringify({ url, throws: info.throws, state: info.state, where: info.where, sack: info.sack, hour: info.hour, errors }));
 await browser.close();
 process.exit(errors.length ? 1 : 0);

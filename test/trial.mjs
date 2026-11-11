@@ -1,4 +1,5 @@
-// Build gate: checks every control on desktop and phone layouts, then plays 10 full games with the autoplayer.
+// Build gate: checks every control and rule on desktop and phone layouts (slingshot, running, climbing, clotheslines,
+// digging, hiding, traps, guards, the meal clock), then plays 10 full games with the autoplayer.
 import fs from 'node:fs';
 import path from 'node:path';
 import { serve, ROOT } from './serve.mjs';
@@ -81,7 +82,7 @@ async function noErrors(page) { assert(page.errors.length === 0, 'console errors
 async function layoutCheck(page) {
   const r = await page.evaluate(() => {
     const vw = innerWidth, vh = innerHeight;
-    const ids = ['status', 'topBtns', 'hideBtn', 'ammo'];
+    const ids = ['status', 'topBtns', 'hideBtn', 'ammo', 'raidBtn', 'trapBtn'].filter(id => { const e = document.getElementById(id); return e && !e.hidden; });
     const boxes = ids.map(id => { const b = document.getElementById(id).getBoundingClientRect(); return { id, l: b.left, t: b.top, r: b.right, b: b.bottom }; });
     const out = boxes.filter(b => b.l < -1 || b.t < -1 || b.r > vw + 1 || b.b > vh + 1).map(b => b.id);
     const overlaps = [];
@@ -246,9 +247,172 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
       T.step(40); const out = T.info(); T.hide(false); T.run(true); return out;
     });
     assert(r.hearts === 3, 'took damage while hidden: ' + JSON.stringify(r));
-    assert(r.boxes >= 10, 'worker did not restock: ' + JSON.stringify(r));
+    assert(r.boxes >= 11, 'worker did not restock: ' + JSON.stringify(r));
+  });
+
+  // ---- the maze: every move on foot
+  const keyUntil = async (key, fn, what, ms = 6000) => {
+    await page.keyboard.down(key);
+    try { await until(page, fn, null, ms, what); } finally { await page.keyboard.up(key); }
+  };
+  await check('keyboard: A leaves the slingshot and runs left', async () => {
+    await page.evaluate(() => { window.TPH.start(0); window.TPH.guardsOff(); });
+    await ready(page);
+    await keyUntil('KeyA', () => { const i = window.TPH.info(); return i.where === 'roam' && i.x < 120; }, 'ran left');
+  });
+  await check('stand still at a can to dig; D runs home and banks the sack into the stash', async () => {
+    await page.evaluate(() => window.TPH.warp(-250, 'g'));
+    await until(page, () => window.TPH.info().sack === 2 && window.TPH.info().cans[0] === 0, null, 6000, 'dug two pieces out');
+    const before = (await info(page)).stash;
+    await keyUntil('KeyD', () => window.TPH.info().where === 'perch', 'back at the slingshot');
+    const i = await info(page);
+    assert(i.sack === 0 && i.stash === before + 2, `stash ${before} -> ${i.stash}, sack ${i.sack}`);
+    await ready(page);
+  });
+  await check('keyboard: W climbs a ladder, S climbs back down', async () => {
+    await page.evaluate(() => window.TPH.warp(-1440, 'g'));
+    await keyUntil('KeyW', () => window.TPH.info().floor === 'A', 'top of the ladder');
+    assert((await info(page)).h === 260, 'not standing on the fire escape');
+    await keyUntil('KeyS', () => window.TPH.info().floor === 'g', 'bottom of the ladder');
+  });
+  await check('keyboard: arrow keys run and climb too', async () => {
+    await page.evaluate(() => window.TPH.warp(-1440, 'g'));
+    await keyUntil('ArrowUp', () => window.TPH.info().floor === 'A', 'ArrowUp climbed');
+    await keyUntil('ArrowRight', () => window.TPH.info().x > -1380, 'ArrowRight ran');
+    await keyUntil('ArrowLeft', () => window.TPH.info().x < -1420, 'ArrowLeft ran');
+    await keyUntil('ArrowDown', () => window.TPH.info().floor === 'g', 'ArrowDown climbed down');
+  });
+  await check('clothesline: run off the fire escape, hang across to the next one', async () => {
+    await page.evaluate(() => window.TPH.warp(-1040, 'A'));
+    await keyUntil('KeyD', () => window.TPH.info().move === 'rope', 'grabbed the line', 3000);
+    await keyUntil('KeyD', () => window.TPH.info().floor === 'B', 'crossed to the far fire escape');
+  });
+  await check('clothesline: S lets go and drops to the ground', async () => {
+    await page.evaluate(() => window.TPH.warp(-1040, 'A'));
+    await keyUntil('KeyD', () => window.TPH.info().move === 'rope' && window.TPH.info().x > -960, 'out on the line', 3000);
+    await keyUntil('KeyS', () => window.TPH.info().floor === 'g', 'dropped');
+  });
+  await check('Space beside a can hides inside it, release pops out', async () => {
+    await page.evaluate(() => window.TPH.warp(-880, 'g'));
+    await keyUntil('Space', () => window.TPH.info().inCan, 'hidden in the can', 2000);
+    await until(page, () => !window.TPH.info().inCan, null, 2000, 'popped out');
+  });
+  await check('E rips a bag open and a chasing guard slips on it', async () => {
+    await page.evaluate(() => { const T = window.TPH; T.warp(-600, 'g'); T.guard(0, -900, 'g', 1); });
+    await page.keyboard.press('KeyE');
+    assert((await info(page)).slicks === 1, 'no slick dropped');
+    await until(page, () => window.TPH.info().guards[0].state === 'stun', null, 6000, 'guard slipped');
+    assert((await info(page)).hearts === 3, 'caught anyway');
+  });
+  await check('RAID button leaves the slingshot', async () => {
+    await page.evaluate(() => { window.TPH.start(0); window.TPH.guardsOff(); });
+    await ready(page);
+    await page.click('#raidBtn');
+    await until(page, () => window.TPH.info().where === 'roam', null, 2000, 'on foot');
+    await until(page, () => !document.getElementById('trapBtn').hidden && document.getElementById('raidBtn').hidden, null, 3000, 'TRAP to replace RAID on foot');
+    assert(await page.isVisible('#trapBtn'), 'TRAP button not on screen');
+  });
+  await check('rule: an empty stash cannot fire, and the HUD says to raid', async () => {
+    await page.evaluate(() => { window.TPH.start(0); window.TPH.setStash([]); });
+    await page.waitForTimeout(400);
+    const p = await page.evaluate(() => window.TPH.pouchScreen());
+    await mouseDrag(page, p, -130, 60);
+    await page.waitForTimeout(300);
+    const i = await info(page);
+    assert(i.throws === 0 && !i.canAim, 'threw with nothing loaded');
+    assert((await page.textContent('#ammoLine')).includes('Out of trash'), 'no out-of-trash message');
+  });
+  await check('rule: a guard who catches the raccoon takes a heart and the whole sack', async () => {
+    const r = await page.evaluate(() => {
+      const T = window.TPH; T.run(false); T.start(0); T.guardsOff(); T.warp(-250, 'g'); T.step(2);
+      const sack = T.info().sack;
+      T.guard(0, -430, 'g', 1);
+      let g = 0; while (T.info().hearts === 3 && g++ < 600) T.step(1 / 60);
+      const o = T.info(); T.run(true); return { sack, hearts: o.hearts, after: o.sack, guard: o.guards[0].state };
+    });
+    assert(r.sack === 2, 'did not dig first: ' + JSON.stringify(r));
+    assert(r.hearts === 2 && r.after === 0, 'catch did not cost a heart and the sack: ' + JSON.stringify(r));
+  });
+  await check('rule: guards cannot follow along a clothesline', async () => {
+    const r = await page.evaluate(() => {
+      const T = window.TPH; T.run(false); T.start(0); T.guardsOff(); T.warp(-1030, 'A'); T.move(1, 0); T.step(0.5); T.move(0, 0);
+      const on = T.info().move;
+      T.guard(0, -1150, 'A', 1); T.step(6);
+      const o = T.info(); T.run(true); return { on, hearts: o.hearts, gx: o.guards[0].x, move: o.move };
+    });
+    assert(r.on === 'rope' && r.move === 'rope', 'not hanging: ' + JSON.stringify(r));
+    assert(r.hearts === 3 && r.gx <= -1020, 'guard reached the line: ' + JSON.stringify(r));
+  });
+  await check('rule: a guard who cannot reach the raccoon gives up instead of camping', async () => {
+    const r = await page.evaluate(() => {
+      const T = window.TPH; T.run(false); T.start(0); T.guardsOff(); T.warp(120, 'g'); T.guard(0, -200, 'g', 1); T.step(1.6);
+      const chasing = T.info().guards[0].state;
+      T.step(5);
+      const o = T.info(); T.run(true); return { chasing, state: o.guards[0].state, gx: o.guards[0].x, hearts: o.hearts };
+    });
+    assert(r.chasing === 'chase', 'guard never chased: ' + JSON.stringify(r));
+    assert(r.state !== 'chase' && r.hearts === 3 && r.gx <= 70, 'guard camped by the slingshot: ' + JSON.stringify(r));
+  });
+  await check('rule: hiding in a can makes a chasing guard give up', async () => {
+    const r = await page.evaluate(() => {
+      const T = window.TPH; T.run(false); T.start(0); T.guardsOff(); T.warp(-880, 'g'); T.guard(0, -1350, 'g', 1); T.step(0.4);
+      const chasing = T.info().guards[0].state;
+      T.hide(true); T.step(7);
+      const o = T.info(); T.hide(false); T.run(true); return { chasing, hearts: o.hearts, state: o.guards[0].state, inCan: o.inCan };
+    });
+    assert(r.chasing === 'chase', 'guard never chased: ' + JSON.stringify(r));
+    assert(r.inCan && r.hearts === 3 && r.state !== 'chase', 'hiding did not work: ' + JSON.stringify(r));
+  });
+  await check('rule: an emptied can has trash again later', async () => {
+    const r = await page.evaluate(() => {
+      const T = window.TPH; T.run(false); T.start(0); T.guardsOff(); T.warp(-250, 'g'); T.step(2.2);
+      const empty = T.info().cans[0];
+      T.warp(-420, 'g'); T.step(28);
+      const o = T.info(); T.run(true); return { empty, later: o.cans[0] };
+    });
+    assert(r.empty === 0 && r.later === 2, JSON.stringify(r));
+  });
+  await check('rule: a banana peel by the back door trips the stocker', async () => {
+    const r = await page.evaluate(() => {
+      const T = window.TPH; T.run(false); T.seed(7); T.start(0); T.setAmmo('banana'); T.hide(false);
+      let fired = false, slipped = false, boxes = 0;
+      for (let t = 0; t < 40 && !slipped; t += 1 / 60) {
+        const i = T.info();
+        if (!fired && i.canAim && i.levelTime > 9) { T.fireDrag(-86, -62); fired = true; boxes = i.boxes; }
+        if (fired && i.worker === 'warn') T.hide(true);
+        if (i.worker === 'slip') slipped = true;
+        T.step(1 / 60);
+      }
+      T.step(6);
+      const o = T.info(); T.hide(false); T.setAmmo(null); T.run(true);
+      return { fired, slipped, boxes, after: o.boxes, hearts: o.hearts };
+    });
+    assert(r.fired && r.slipped, 'stocker did not slip: ' + JSON.stringify(r));
+    assert(r.after <= r.boxes, 'he still stacked his box: ' + JSON.stringify(r));
+  });
+  await check('the clock moves six hours after a meal and the light changes', async () => {
+    await page.evaluate(() => window.TPH.start(0));
+    const a = await info(page);
+    assert(a.hour === 0 && a.night === 1 && a.day === 1, 'level 1 is not midnight: ' + JSON.stringify([a.hour, a.night, a.day]));
+    await page.evaluate(() => window.TPH.forceWin());
+    await until(page, () => window.TPH.info().state === 'winning' && window.TPH.info().hour > 2, null, 20000, 'clock running during the meal');
+    await page.waitForSelector('button[data-act=next]', { timeout: 25000 });
+    assert((await page.textContent('#overlay')).includes('6:00 AM'), 'win card does not show the new time');
+    await page.click('button[data-act=next]');
+    await until(page, () => window.TPH.info().level === 1 && window.TPH.info().state === 'play', null, 3000, 'breakfast');
+    const b = await info(page);
+    assert(b.hour === 6 && b.night < 0.5, 'breakfast is not at dawn: ' + JSON.stringify([b.hour, b.night]));
+    assert((await page.textContent('#lvl')).includes('6:00 AM'), 'HUD clock wrong');
+  });
+  await check('after dinner a new day starts at midnight', async () => {
+    await page.evaluate(() => { window.TPH.start(3); window.TPH.forceWin(); });
+    await page.waitForSelector('button[data-act=next]', { timeout: 25000 });
+    await page.click('button[data-act=next]');
+    await until(page, () => { const i = window.TPH.info(); return i.level === 0 && i.day === 2 && i.hour === 0 && i.state === 'play'; }, null, 3000, 'day 2');
   });
   await check('rule: window blur releases a held hide', async () => {
+    await page.evaluate(() => window.TPH.start(0));
+    await ready(page);
     await page.keyboard.down('Space');
     await until(page, () => window.TPH.info().hide > 0.9, null, 2000, 'hidden');
     await page.evaluate(() => window.dispatchEvent(new Event('blur')));
@@ -262,9 +426,9 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
   log(`\n${GAMES}-game trial (autoplayer, real game rules, fixed seeds)`);
   const games = [];
   for (let i = 0; i < GAMES; i++) {
-    const r = await page.evaluate(([lvl, seed]) => { window.TPH.run(false); return window.TPH.autoplay(lvl, seed); }, [i % 3, 1000 + i]);
+    const r = await page.evaluate(([lvl, seed]) => { window.TPH.run(false); return window.TPH.autoplay(lvl, seed); }, [i % 4, 1000 + i]);
     games.push(r);
-    log(`  game ${String(i + 1).padStart(2)}  level ${r.level}  ${r.result.padEnd(7)}  ${String(r.time).padStart(6)}s  ${String(r.throws).padStart(3)} throws  ${r.hearts} hearts`);
+    log(`  game ${String(i + 1).padStart(2)}  meal ${r.level}  ${r.result.padEnd(7)}  ${String(r.time).padStart(6)}s  ${String(r.throws).padStart(3)} throws  ${r.trips} raids  ${r.slips} guards tripped  caught ${r.caught}x  ${r.hearts} hearts`);
   }
   await page.evaluate(() => window.TPH.run(true));
   const wins = games.filter(g => g.result === 'win').length;
@@ -323,7 +487,71 @@ for (const ph of PHONES) {
     await until(page, () => window.TPH.info().projs >= 3, null, 1500, 'split');
     await page.evaluate(() => window.TPH.setAmmo(null));
   });
+
+  await check('touch: RAID button, then drag anywhere to run', async () => {
+    await page.evaluate(() => { window.TPH.start(0); window.TPH.guardsOff(); });
+    await ready(page);
+    const c = await center(page, '#raidBtn');
+    await page.touchscreen.tap(c.x, c.y);
+    await until(page, () => window.TPH.info().where === 'roam', null, 2000, 'on foot');
+    const o = { x: ph.viewport.width * 0.32, y: ph.viewport.height * 0.6 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: o.x, y: o.y, id: 5 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: o.x - 60, y: o.y, id: 5 }] });
+    assert(await page.isVisible('#stick'), 'thumbstick not shown');
+    await until(page, () => window.TPH.info().x < 150, null, 5000, 'ran left');
+    await touchUp(cdp);
+    const x = (await info(page)).x;
+    await page.waitForTimeout(300);
+    assert(Math.abs((await info(page)).x - x) < 30, 'kept running after lifting the thumb');
+  });
+  await check('touch: thumbstick up climbs a ladder, down climbs back', async () => {
+    await page.evaluate(() => window.TPH.warp(-1440, 'g'));
+    const o = { x: ph.viewport.width * 0.32, y: ph.viewport.height * 0.6 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: o.x, y: o.y, id: 5 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: o.x, y: o.y - 60, id: 5 }] });
+    await until(page, () => window.TPH.info().floor === 'A', null, 5000, 'climbed');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: o.x, y: o.y + 60, id: 5 }] });
+    await until(page, () => window.TPH.info().floor === 'g', null, 5000, 'climbed down');
+    await touchUp(cdp);
+  });
+  await check('touch: dig at a can, run home, and the sack becomes the stash', async () => {
+    await page.evaluate(() => window.TPH.warp(-250, 'g'));
+    await until(page, () => window.TPH.info().sack === 2, null, 6000, 'dug');
+    const before = (await info(page)).stash;
+    const o = { x: ph.viewport.width * 0.32, y: ph.viewport.height * 0.6 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: o.x, y: o.y, id: 5 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: o.x + 60, y: o.y, id: 5 }] });
+    await until(page, () => window.TPH.info().where === 'perch', null, 6000, 'home');
+    await touchUp(cdp);
+    assert((await info(page)).stash === before + 2, 'sack not banked');
+  });
+  await check('touch: TRAP button drops a slick, HIDE by a can hides', async () => {
+    await page.evaluate(() => window.TPH.warp(-880, 'g'));
+    await until(page, () => !document.getElementById('trapBtn').hidden, null, 3000, 'TRAP button shown');
+    const t = await center(page, '#trapBtn');
+    await page.touchscreen.tap(t.x, t.y);
+    await until(page, () => window.TPH.info().slicks === 1, null, 2000, 'slick');
+    const hb = await center(page, '#hideBtn');
+    await touchHold(cdp, hb, 100);
+    await until(page, () => window.TPH.info().inCan, null, 3000, 'hidden in the can');
+    await touchUp(cdp);
+    await until(page, () => !window.TPH.info().inCan, null, 2000, 'popped out');
+  });
+  await check('touch: run with one thumb while the other holds HIDE at a can', async () => {
+    await page.evaluate(() => { window.TPH.warp(-700, 'g'); });
+    const o = { x: ph.viewport.width * 0.32, y: ph.viewport.height * 0.6 };
+    const hb = await center(page, '#hideBtn');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: o.x, y: o.y, id: 5 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: o.x - 60, y: o.y, id: 5 }] });
+    await until(page, () => window.TPH.info().x < -850, null, 5000, 'ran to the can');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: o.x - 60, y: o.y, id: 5 }, { x: hb.x, y: hb.y, id: 6 }] });
+    await until(page, () => window.TPH.info().inCan, null, 2000, 'hid mid-run');
+    await touchUp(cdp);
+    await until(page, () => !window.TPH.info().inCan, null, 2000, 'out');
+  });
   await check('touch: pause and restart buttons respond to taps', async () => {
+    await page.evaluate(() => window.TPH.start(0));
+    await ready(page);
     const pb = await center(page, '#pauseBtn');
     await page.touchscreen.tap(pb.x, pb.y);
     await until(page, () => window.TPH.info().state === 'paused', null, 2000, 'paused');
@@ -391,6 +619,8 @@ for (const ph of PHONES) {
   });
   await check('touch: page does not scroll or zoom on drag', async () => {
     await touchDrag(cdp, { x: ph.viewport.width * 0.8, y: ph.viewport.height * 0.6 }, -200, -200);
+    await page.evaluate(() => window.TPH.warp(-600, 'g'));
+    await touchDrag(cdp, { x: ph.viewport.width * 0.5, y: ph.viewport.height * 0.5 }, -150, -150);
     const s = await page.evaluate(() => [scrollX, scrollY, visualViewport ? visualViewport.scale : 1]);
     assert(s[0] === 0 && s[1] === 0 && s[2] === 1, 'scrolled/zoomed: ' + s);
   });

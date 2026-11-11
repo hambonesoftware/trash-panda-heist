@@ -45,6 +45,12 @@ export const sfx = {
   clang() { tone(1250, 0.28, 'triangle', 0.12, 720); },
   duck() { tone(420, 0.1, 'triangle', 0.06, 200); },
   split() { tone(700, 0.1, 'triangle', 0.08, 1300); },
+  grab() { tone(540, 0.07, 'triangle', 0.08, 880); noise(0.08, 0.1, 1800); },
+  rip() { noise(0.22, 0.2, 900); tone(210, 0.16, 'sawtooth', 0.05, 90); },
+  slip() { tone(900, 0.28, 'sine', 0.1, 180); noise(0.2, 0.16, 600); },
+  bank() { [660, 880].forEach((f, i) => tone(f, 0.12, 'triangle', 0.1, 0, i * 0.08)); },
+  tick() { tone(1400, 0.03, 'square', 0.03); },
+  munch() { noise(0.09, 0.14, 1400); },
   win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.12, 0, i * 0.11)); },
   lose() { [392, 330, 262, 196].forEach((f, i) => tone(f, 0.26, 'sawtooth', 0.08, 0, i * 0.14)); },
 };

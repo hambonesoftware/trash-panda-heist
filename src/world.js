@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { M, RB, SP, CY, CA, CO, ell, put, toon, glowMat, RoundedBoxGeometry } from './gfx.js';
+import { M, RB, SP, CY, CA, CO, ell, put, toon, glowMat, rimU, RoundedBoxGeometry } from './gfx.js';
 import { rand, rng, lerp } from './util.js';
 import { G, ZONE, DUMP_X, DOOR_X, DOCK_Y, CAN_X, CS } from './config.js';
 
@@ -70,6 +70,15 @@ function brickWall() {
   });
 }
 
+// Sky, fog and light for each meal time. `night` drives lamps, neon, stars and city windows.
+const TIMES = [
+  { h: 0,  top: 0x070926, mid: 0x2a2266, bot: 0x7a4386, fog: 0x2b2457, sky: 0x95a3ff, gnd: 0x3b2a52, hemi: 1.35, key: 0xc9d7ff, keyI: 2.1, pos: [-300, 1300, 1100], night: 1,    cloud: 1,   rim: 0x9cc0ff },
+  { h: 6,  top: 0x5f78c8, mid: 0xffa98a, bot: 0xffe0a8, fog: 0xc79aa6, sky: 0xffdcc0, gnd: 0x6a566c, hemi: 1.8,  key: 0xffb788, keyI: 2.6, pos: [2300, 620, 1000],  night: 0.12, cloud: 2.1, rim: 0xffc79a },
+  { h: 12, top: 0x2f7fd6, mid: 0x86c8f4, bot: 0xd6eefa, fog: 0xb4d6ee, sky: 0xe6f4ff, gnd: 0x77777f, hemi: 2.0,  key: 0xfff3dc, keyI: 2.9, pos: [500, 1900, 1000],  night: 0,    cloud: 2.6, rim: 0xffffff },
+  { h: 18, top: 0x4a3a86, mid: 0xf0688a, bot: 0xffb05a, fog: 0xa8607a, sky: 0xffbe96, gnd: 0x4a3458, hemi: 1.65, key: 0xff9257, keyI: 2.5, pos: [-1700, 520, 1000], night: 0.35, cloud: 1.8, rim: 0xffb07a },
+  { h: 24, top: 0x070926, mid: 0x2a2266, bot: 0x7a4386, fog: 0x2b2457, sky: 0x95a3ff, gnd: 0x3b2a52, hemi: 1.35, key: 0xc9d7ff, keyI: 2.1, pos: [-300, 1300, 1100], night: 1,    cloud: 1,   rim: 0x9cc0ff },
+];
+
 function skyline(scene, { z, width, height, y0, color, density, glow, seedTall }) {
   const cw = 2048, ch = 512;
   const win = canvas(cw, ch, g => { g.fillStyle = '#000'; g.fillRect(0, 0, cw, ch); });
@@ -108,6 +117,7 @@ function skyline(scene, { z, width, height, y0, color, density, glow, seedTall }
   a.position.set(700, y0 + height / 2, z);
   b.position.set(700, y0 + height / 2, z + 2);
   scene.add(a, b);
+  return { mat: b.material, glow };
 }
 
 function cone(r, h, color, opacity) {
@@ -131,13 +141,14 @@ export function buildWorld(scene, view) {
   scene.fog = new THREE.Fog(0x2b2457, 3800, 10500);
 
   // ---------- lights ----------
-  scene.add(new THREE.HemisphereLight(0x95a3ff, 0x3b2a52, 1.35));
+  const hemi = new THREE.HemisphereLight(0x95a3ff, 0x3b2a52, 1.35);
+  scene.add(hemi);
   const moon = new THREE.DirectionalLight(0xc9d7ff, 2.1);
   moon.position.set(-300, 1300, 1100);
   moon.target.position.set(760, 80, -60);
   moon.castShadow = true;
   moon.shadow.mapSize.set(2048, 2048);
-  Object.assign(moon.shadow.camera, { left: -1150, right: 1150, top: 850, bottom: -850, near: 100, far: 4200 });
+  Object.assign(moon.shadow.camera, { left: -2700, right: 1300, top: 1100, bottom: -1000, near: 100, far: 6500 });
   moon.shadow.bias = -0.0006;
   moon.shadow.normalBias = 2.5;
   scene.add(moon, moon.target);
@@ -158,7 +169,7 @@ export function buildWorld(scene, view) {
   for (let i = 0; i < 260; i++) starPos.push(rand(-6000, 7500), rand(900, 4200), -8500);
   const stars = new THREE.BufferGeometry();
   stars.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
-  const starMat = new THREE.PointsMaterial({ color: new THREE.Color(1.6, 1.55, 1.3), size: 2.2, sizeAttenuation: false, fog: false, toneMapped: false });
+  const starMat = new THREE.PointsMaterial({ color: new THREE.Color(1.6, 1.55, 1.3), size: 2.2, sizeAttenuation: false, fog: false, toneMapped: false, transparent: true });
   scene.add(new THREE.Points(stars, starMat));
 
   const moonTex = tex(canvas(512, 512, g => {
@@ -173,6 +184,9 @@ export function buildWorld(scene, view) {
   const halo = new THREE.Mesh(new THREE.PlaneGeometry(4200, 4200), new THREE.MeshBasicMaterial({ map: softDot, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, color: new THREE.Color(0.35, 0.33, 0.55) }));
   halo.position.set(-1500, 2300, -8010);
   scene.add(halo, moonDisk);
+  const sunDisk = new THREE.Mesh(new THREE.PlaneGeometry(1500, 1500), new THREE.MeshBasicMaterial({ map: softDot, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false }));
+  sunDisk.visible = false;
+  scene.add(sunDisk);
 
   const cloudTex = tex(canvas(512, 160, g => {
     for (let i = 0; i < 9; i++) {
@@ -195,9 +209,11 @@ export function buildWorld(scene, view) {
     W.clouds.push(c);
   }
 
-  skyline(scene, { z: -5200, width: 16000, height: 3400, y0: -200, color: '#3c3577', density: 0.1, glow: 0.7, seedTall: 0.85 });
-  skyline(scene, { z: -3600, width: 11000, height: 2200, y0: -150, color: '#2a2558', density: 0.16, glow: 1.05, seedTall: 0.8 });
-  skyline(scene, { z: -2200, width: 7600, height: 1350, y0: -80, color: '#1b1838', density: 0.2, glow: 1.4, seedTall: 0.75 });
+  const city = [
+    skyline(scene, { z: -5200, width: 16000, height: 3400, y0: -200, color: '#3c3577', density: 0.1, glow: 0.7, seedTall: 0.85 }),
+    skyline(scene, { z: -3600, width: 11000, height: 2200, y0: -150, color: '#2a2558', density: 0.16, glow: 1.05, seedTall: 0.8 }),
+    skyline(scene, { z: -2200, width: 7600, height: 1350, y0: -80, color: '#1b1838', density: 0.2, glow: 1.4, seedTall: 0.75 }),
+  ];
 
   W.beams = [];
   for (const [x, z, ph] of [[-900, -4200, 0], [2300, -3900, 2.1]]) {
@@ -377,11 +393,13 @@ export function buildWorld(scene, view) {
   scene.add(put(CO(26, 22, 0x2a2838, 2, 20), sodX, 342, -282));
   scene.add(put(new THREE.Mesh(new THREE.SphereGeometry(9, 14, 10), glowMat(0xffc277, 3)), sodX, 332, -282));
   const sodCone = cone(150, 330, 0xffb05a, 0.13);
+  W.nightLights = [];
   sodCone.position.set(sodX, 332, -282);
   scene.add(sodCone);
   const sod = new THREE.PointLight(0xffa24d, 520, 900, 1);
   sod.position.set(sodX, 320, -240);
   scene.add(sod);
+  W.nightLights.push({ light: sod, base: 520, cone: sodCone, op: 0.13 });
 
   // Street lamp on the raccoon's side.
   const LAMP = 0x2a2838;
@@ -396,6 +414,7 @@ export function buildWorld(scene, view) {
   W.streetLight = new THREE.PointLight(0xaed0ff, 340, 1000, 1);
   W.streetLight.position.set(90, 430, -60);
   scene.add(W.streetLight);
+  W.nightLights.push({ light: W.streetLight, base: 340, cone: streetCone, op: 0.12 });
   W.moths = [];
   const mothMat = glowMat(0xfff4c8, 1.8);
   for (let i = 0; i < 6; i++) {
@@ -503,14 +522,53 @@ export function buildWorld(scene, view) {
     W.doorLampMat.color.copy(mode === 'warn' ? (blink ? lampWarn : lampOff) : mode === 'hot' ? lampHot : mode === 'on' ? lampWarn : lampOff);
   };
 
+  // ---------- time of day ----------
+  const cA = new THREE.Color(), cB = new THREE.Color();
+  const mix = (a, b, k) => cA.set(a).lerp(cB.set(b), k);
+  W.hour = 0; W.night = 1;
+  W.setTime = hour => {
+    const hh = ((hour % 24) + 24) % 24;
+    let i = 0;
+    while (i < TIMES.length - 2 && hh >= TIMES[i + 1].h) i++;
+    const a = TIMES[i], b = TIMES[i + 1], k = (hh - a.h) / (b.h - a.h);
+    sky.material.uniforms.top.value.copy(mix(a.top, b.top, k));
+    sky.material.uniforms.mid.value.copy(mix(a.mid, b.mid, k));
+    sky.material.uniforms.bot.value.copy(mix(a.bot, b.bot, k));
+    scene.background.copy(mix(a.mid, b.mid, k));
+    scene.fog.color.copy(mix(a.fog, b.fog, k));
+    hemi.color.copy(mix(a.sky, b.sky, k));
+    hemi.groundColor.copy(mix(a.gnd, b.gnd, k));
+    hemi.intensity = lerp(a.hemi, b.hemi, k);
+    moon.color.copy(mix(a.key, b.key, k));
+    moon.intensity = lerp(a.keyI, b.keyI, k);
+    moon.position.set(lerp(a.pos[0], b.pos[0], k), lerp(a.pos[1], b.pos[1], k), lerp(a.pos[2], b.pos[2], k));
+    rimU.rimColor.value.copy(mix(a.rim, b.rim, k));
+    const night = lerp(a.night, b.night, k), cloud = lerp(a.cloud, b.cloud, k);
+    W.hour = hh; W.night = night;
+    starMat.opacity = Math.max(0, night * 1.6 - 0.6);
+    moonDisk.material.opacity = night; halo.material.opacity = night;
+    moonDisk.visible = halo.visible = night > 0.02;
+    // the sun rides an arc from the east (right) at dawn to the west at dusk
+    const day = Math.max(0, Math.min(1, (hh - 5) / 14));
+    sunDisk.visible = hh > 4.5 && hh < 19.5;
+    sunDisk.position.set(lerp(6200, -4800, day), 500 + Math.sin(day * Math.PI) * 3300, -8200);
+    sunDisk.material.color.copy(mix(0xff9a5a, 0xfff2c8, Math.sin(day * Math.PI))).multiplyScalar(1.6);
+    for (const c of W.clouds) c.material.color.setScalar(cloud);
+    for (const s of city) s.mat.color.setScalar(s.glow * (0.12 + 0.88 * night));
+    for (const n of W.nightLights) { n.light.intensity = n.base * night; n.cone.userData.mat.uniforms.op.value = n.op * night; }
+    for (const b2 of W.beams) b2.visible = night > 0.6;
+    W.neonK = 0.35 + 0.65 * night;
+  };
+  W.neonK = 1;
+
   W.update = (dt, t) => {
     W.t = t;
     for (const b of W.beams) b.rotation.z = Math.sin(t * 0.25 + b.userData.ph) * 0.45 + (b.position.x < 0 ? -0.15 : 0.15);
     for (const c of W.clouds) { c.position.x += c.userData.speed * dt; if (c.position.x > 6000) c.position.x = -5000; }
     W.fan.rotation.z -= dt * 9;
     const flick = Math.sin(t * 1.7) + Math.sin(t * 13.1) * 0.3 > 1.15 ? 0.25 : 1;
-    W.neonMat.opacity = flick;
-    W.neonLight.intensity = 260 * flick;
+    W.neonMat.opacity = flick * (0.5 + 0.5 * W.neonK);
+    W.neonLight.intensity = 260 * flick * W.neonK;
     W.moths.forEach((m, i) => {
       const u = m.userData, a = t * u.s + u.ph;
       m.position.set(60 + Math.cos(a) * u.r, 440 + u.y + Math.sin(a * 1.7) * 10, -170 + Math.sin(a) * u.r * 0.6);

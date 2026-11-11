@@ -95,6 +95,34 @@ function raccoonClips(rig) {
     }), 'out'],
     [0.45, P(R_DUCK, { head: [0, 0, 10] }), 'io'],
   ], rig), false);
+  // Lode Runner moves: climbing a ladder, hanging from a clothesline, digging through a can.
+  const climbPose = k => P(S, {
+    '@hips': [0, k ? 2 : -2, 0], spine: [0, 0, 2], chest: [0, 0, 4], neck: [0, 0, -8], head: [0, 0, -16],
+    uarmR: [0, 0, k ? 168 : 112], farmR: [0, 0, k ? 14 : 72], uarmL: [0, 0, k ? 112 : 168], farmL: [0, 0, k ? 72 : 14],
+    thighR: [0, 0, k ? 78 : 8], shinR: [0, 0, k ? -96 : -18], footR: [0, 0, 20], thighL: [0, 0, k ? 8 : 78], shinL: [0, 0, k ? -18 : -96], footL: [0, 0, 20],
+    tail0: [0, 0, k ? 34 : 48], tail1: [0, 0, 6], tail2: [0, 0, 4],
+  });
+  rig.add(clip('climb', [[0, climbPose(0), 'lin'], [0.22, climbPose(1), 'io'], [0.44, climbPose(0), 'io']], rig));
+  const hangPose = k => P(S, {
+    '@hips': [0, 0, 0], hips: [0, 0, k * 7], spine: [0, 0, 4 + k * 4], chest: [0, 0, 2], neck: [0, 0, -6], head: [0, 0, -10 - k * 4],
+    uarmR: [0, 0, 172], farmR: [0, 0, 8], uarmL: [0, 0, 172], farmL: [0, 0, 8],
+    thighR: [0, 0, 14 + k * 22], shinR: [0, 0, -34], footR: [0, 0, 34], thighL: [0, 0, -4 + k * 16], shinL: [0, 0, -26], footL: [0, 0, 34],
+    tail0: [0, 0, 26 - k * 30], tail1: [0, 0, -6 - k * 8], tail2: [0, 0, -8], tail3: [0, 0, -8],
+  });
+  rig.add(clip('hang', [[0, hangPose(-1), 'lin'], [0.36, hangPose(1), 'io'], [0.72, hangPose(-1), 'io']], rig));
+  const digPose = k => P(S, {
+    '@hips': [-4, -6, 0], hips: [0, 0, -20], spine: [0, 0, -34], chest: [0, 0, -26], neck: [0, 0, -6], head: [0, k * 14, 26],
+    earL: [-16, 0, k > 0 ? 24 : -8], earR: [16, 0, k > 0 ? -8 : 24],
+    uarmR: [0, 0, k > 0 ? 96 : 56], farmR: [0, 0, k > 0 ? 18 : 70], uarmL: [0, 0, k > 0 ? 56 : 96], farmL: [0, 0, k > 0 ? 70 : 18],
+    thighR: [0, 0, 34], shinR: [0, 0, -46], footR: [0, 0, 12], thighL: [0, 0, 18], shinL: [0, 0, -40], footL: [0, 0, 22],
+    tail0: [0, 0, 70 + k * 16], tail1: [0, 0, 14], tail2: [0, 0, 8],
+  });
+  rig.add(clip('rummage', [[0, digPose(-1), 'lin'], [0.14, digPose(1), 'io'], [0.28, digPose(-1), 'io']], rig));
+  rig.add(clip('fall', [
+    [0, P(S, { uarmR: [0, 0, 150], farmR: [0, 0, 30], uarmL: [0, 0, 160], farmL: [0, 0, 30], thighR: [0, 0, 40], shinR: [0, 0, -70], thighL: [0, 0, -20], shinL: [0, 0, -50], tail0: [0, 0, -20], head: [0, 0, -8] })],
+    [0.2, P(S, { uarmR: [0, 0, 162], farmR: [0, 0, 20], uarmL: [0, 0, 148], farmL: [0, 0, 40], thighR: [0, 0, -16], shinR: [0, 0, -52], thighL: [0, 0, 42], shinL: [0, 0, -72], tail0: [0, 0, -34], head: [0, 0, -4] }), 'io'],
+    [0.4, P(S, { uarmR: [0, 0, 150], farmR: [0, 0, 30], uarmL: [0, 0, 160], farmL: [0, 0, 30], thighR: [0, 0, 40], shinR: [0, 0, -70], thighL: [0, 0, -20], shinL: [0, 0, -50], tail0: [0, 0, -20], head: [0, 0, -8] }), 'io'],
+  ], rig));
   const up = { uarmR: [0, 0, 165], farmR: [0, 0, 25], uarmL: [0, 0, 150], farmL: [0, 0, 40], head: [0, 0, -12], earL: [-16, 0, -10], earR: [16, 0, -10] };
   rig.add(clip('cheer', [
     [0, P(S, up)],
@@ -187,11 +215,14 @@ export function buildRaccoon() {
   const sling = buildSlingshot();
   sling.group.position.set(36, 76, 22);
   root.add(sling.group);
+  const sackAnchor = new THREE.Object3D();
+  sackAnchor.position.set(-20, 4, 0);
+  J.chest.add(sackAnchor);
 
   const rig = new Rig(root, J);
   raccoonClips(rig);
   rig.play('idle', 0);
-  return { outer, root, J, rig, eyes, sling, windup: rig.compile(R_WINDUP) };
+  return { outer, root, J, rig, eyes, sling, sackAnchor, windup: rig.compile(R_WINDUP) };
 }
 
 // Rubber band and pouch live in world space so they can stretch freely between the fork tips and the drag point.
@@ -278,6 +309,38 @@ function workerClips(rig) {
     }), 'out'],
     [0.95, P(S, { uarmR: [-12, 0, 30], farmR: [0, 0, 20], uarmL: [12, 0, 28], farmL: [0, 0, 20] }), 'io'],
   ], rig), false);
+  rig.add(walkClip('run', rig, { dur: 0.52, stride: 36, bounce: 6, arm: 46, lean: -14 }));
+  const climb = k => P(S, {
+    spine: [0, 0, 2], head: [0, 0, -14],
+    uarmR: [-8, 0, k ? 165 : 118], farmR: [0, 0, k ? 16 : 70], uarmL: [8, 0, k ? 118 : 165], farmL: [0, 0, k ? 70 : 16],
+    thighR: [0, 0, k ? 66 : 6], shinR: [0, 0, k ? -84 : -12], thighL: [0, 0, k ? 6 : 66], shinL: [0, 0, k ? -12 : -84],
+  });
+  rig.add(clip('climb', [[0, climb(0), 'lin'], [0.3, climb(1), 'io'], [0.6, climb(0), 'io']], rig));
+  // Slipped on a ripped trash bag: feet fly out, lands sitting, shakes it off.
+  const SAT = P(S, {
+    '@hips': [-14, -62, 0], hips: [0, 0, 26], spine: [0, 0, -6], chest: [0, 0, -4], head: [0, 0, 6],
+    thighR: [0, 0, 96], shinR: [0, 0, -14], footR: [0, 0, 10], thighL: [0, 0, 84], shinL: [0, 0, -26], footL: [0, 0, 10],
+    uarmR: [-30, 0, -36], farmR: [0, 0, 20], uarmL: [30, 0, -30], farmL: [0, 0, 20],
+  });
+  rig.add(clip('slip', [
+    [0, S],
+    [0.16, P(S, {
+      '@hips': [-8, -10, 0], hips: [0, 0, 52], spine: [0, 0, 16], head: [0, 0, -18],
+      thighR: [0, 0, 110], shinR: [0, 0, -8], thighL: [0, 0, 78], shinL: [0, 0, -20], uarmR: [-20, 0, 160], farmR: [0, 0, 20], uarmL: [20, 0, 150], farmL: [0, 0, 26],
+    }), 'out'],
+    [0.42, SAT, 'in'],
+    [0.9, P(SAT, { head: [0, 26, 10], chest: [0, 10, -4] }), 'io'],
+    [1.4, P(SAT, { head: [0, -26, 10], chest: [0, -10, -4], uarmR: [-30, 0, 120], farmR: [0, 0, 120] }), 'io'],
+    [2.0, P(SAT, { head: [0, 0, 6] }), 'io'],
+  ], rig), false);
+  // Caught him: a grab and a triumphant shake.
+  rig.add(clip('grabbed', [
+    [0, S],
+    [0.14, P(S, { spine: [0, 0, -30], chest: [0, 0, -18], head: [0, 0, 12], uarmR: [-8, 0, 70], farmR: [0, 0, 10], uarmL: [8, 0, 70], farmL: [0, 0, 10], '@hips': [6, -10, 0] }), 'out'],
+    [0.5, P(S, { spine: [0, 0, 6], head: [0, 0, -8], uarmR: [-10, 0, 160], farmR: [0, 0, 40], uarmL: [10, 0, 30], farmL: [0, 0, 30] }), 'io'],
+    [0.9, P(S, { spine: [0, 0, 4], head: [0, 14, -4], uarmR: [-10, 0, 150], farmR: [0, 0, 70], uarmL: [10, 0, 30], farmL: [0, 0, 30] }), 'io'],
+    [1.3, S, 'io'],
+  ], rig), false);
   const POINT = P(S, {
     spine: [0, 0, -14], chest: [0, 0, -10], neck: [0, 0, 6], head: [0, 0, 10],
     uarmR: [-6, 0, 96], farmR: [0, 0, 6], uarmL: [10, 0, 30], farmL: [0, 0, 60], '@hips': [4, -2, 0], thighL: [0, 0, 16], shinL: [0, 0, -14],
@@ -299,8 +362,8 @@ function workerClips(rig) {
   ], rig), false);
 }
 
-export function buildWorker() {
-  const { SHIRT, PANTS, SKIN, APRON, CAP, BOOT, HAIR, WHITE } = WK;
+export function buildWorker(palette = {}) {
+  const { SHIRT, PANTS, SKIN, APRON, CAP, BOOT, HAIR, WHITE } = { ...WK, ...palette };
   const outer = new THREE.Group(), root = new THREE.Group();
   outer.add(root);
   const J = {};
@@ -415,6 +478,37 @@ export function ammoMesh(type) {
     g.add(bag);
     g.add(put(CO(8, 14, 0x3f4558, 2, 10), 0, 24, 0));
     for (const sz of [-1, 1]) { const ear = CO(4, 10, 0x3f4558, 1.5, 8); ear.rotation.x = sz * 0.9; g.add(put(ear, 0, 30, sz * 4)); }
+  } else if (type === 'bottle') {
+    const pts = [[0, -15], [6.5, -15], [7.5, -13], [7.5, 2], [6, 6], [3, 9], [2.6, 15], [3.4, 15.6], [3.4, 17], [0, 17]].map(([x, y]) => new THREE.Vector2(x, y));
+    const b = M(new THREE.LatheGeometry(pts, 16), toon(0x4fae7a, { rim: 1.2 }), 1.8);
+    g.add(b);
+    g.add(put(CY(7.7, 7.7, 8, 0xf2e6c2, 0, 16), 0, -5, 0));
+    g.rotation.z = -0.5;
+  } else if (type === 'melon') {
+    const rind = M(new THREE.SphereGeometry(27, 24, 14, 0, Math.PI), 0x3f8f4a, 2.4);
+    rind.rotation.y = Math.PI / 2;
+    rind.rotation.x = Math.PI / 2;
+    g.add(rind);
+    const flesh = M(new THREE.CircleGeometry(25.5, 24), toon(0xef5b6c, { rim: 0 }), 0);
+    flesh.rotation.x = -Math.PI / 2;
+    g.add(put(flesh, 0, 0.5, 0));
+    const pith = M(new THREE.RingGeometry(23.5, 26.8, 24), toon(0xe9f2d0, { rim: 0 }), 0);
+    pith.rotation.x = -Math.PI / 2;
+    g.add(put(pith, 0, 0.8, 0));
+    for (const [x, z] of [[-10, 4], [8, -6], [2, 12], [-4, -12], [14, 8]]) g.add(put(ell(2.2, 1, 0.5, 1.6, 0x1b1620, 0), x, 1.4, z));
+    g.rotation.x = 0.9;
+  } else if (type === 'banana') {
+    const Y = 0xf2d24a;
+    for (const a of [0, 2.1, 4.2]) {
+      const flap = M(new THREE.TorusGeometry(11, 3.4, 8, 12, 1.5), Y, 1.6);
+      flap.rotation.set(Math.PI / 2, 0, a);
+      const piv = new THREE.Group();
+      piv.rotation.y = a;
+      piv.add(put(flap, 9, -2, 0));
+      flap.rotation.set(0, 0, -0.5);
+      g.add(piv);
+    }
+    g.add(put(CY(2.6, 3.4, 9, 0x6b4a24, 1.2, 8), 0, 9, 0));
   } else {
     const BONE = 0xf3eede;
     const spine = CY(2.2, 2.2, 30, BONE, 1.5, 8);

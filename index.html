@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Trash Panda Heist</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='34' r='26' fill='%238f99b2'/%3E%3Cellipse cx='32' cy='32' rx='22' ry='9' fill='%232b2d3d'/%3E%3Ccircle cx='22' cy='32' r='4' fill='%23fff'/%3E%3Ccircle cx='42' cy='32' r='4' fill='%23fff'/%3E%3C/svg%3E">
-<meta name="description" content="Fling trash with a slingshot, dodge the night crew, and raid the dumpster.">
+<meta name="description" content="Raid the trash cans, haul the loot back to your slingshot, smash the boxes and eat. Every six hours, a new meal.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap" rel="stylesheet">
@@ -88,7 +88,7 @@
   #muteBtn.off .x { display: inline; }
   #muteBtn.off .w { display: none; }
   #hideBtn {
-    position: absolute; left: calc(14px + var(--sal)); bottom: calc(14px + var(--sab));
+    position: absolute; right: calc(14px + var(--sar)); bottom: calc(14px + var(--sab));
     width: clamp(72px, 9vw, 108px); height: clamp(72px, 9vw, 108px); border-radius: 50%;
     background: var(--green); color: #fff; border: 4px solid var(--ink); box-shadow: 4px 4px 0 var(--ink);
     font-family: var(--display); font-size: clamp(16px, 2vw, 24px); letter-spacing: 1px;
@@ -98,6 +98,33 @@
   #hideBtn .touch { display: none; }
   @media (pointer: coarse) { #hideBtn .touch { display: inline; } #hideBtn .kb { display: none; } }
   #hideBtn.active { background: var(--gold); color: #2a1d05; transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
+  .pad {
+    position: absolute; border-radius: 50%; border: 4px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); color: #fff;
+    font-family: var(--display); letter-spacing: 1px; cursor: pointer; touch-action: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+  }
+  .pad[hidden] { display: none; }
+  .pad small { font: 600 10px system-ui, sans-serif; opacity: 0.85; margin-top: 4px; letter-spacing: 0; }
+  .pad:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
+  @media (pointer: coarse) { .pad .kb { display: none; } }
+  #raidBtn {
+    left: calc(14px + var(--sal)); bottom: calc(14px + var(--sab)); background: var(--violet); color: var(--ink);
+    width: clamp(72px, 9vw, 108px); height: clamp(72px, 9vw, 108px); font-size: clamp(16px, 2vw, 24px);
+  }
+  #trapBtn {
+    right: calc(14px + var(--sar)); bottom: calc(26px + var(--sab) + clamp(72px, 9vw, 108px)); background: var(--red);
+    width: clamp(58px, 7vw, 84px); height: clamp(58px, 7vw, 84px); font-size: clamp(13px, 1.6vw, 19px);
+  }
+  #trapBtn.cool { opacity: 0.45; }
+  #stick {
+    position: absolute; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; display: none; pointer-events: none;
+    background: rgba(244, 236, 223, 0.14); border: 3px solid rgba(13, 10, 24, 0.7);
+  }
+  #stick.on { display: block; }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%;
+    background: rgba(244, 236, 223, 0.75); border: 3px solid var(--ink);
+  }
   #rotate {
     display: none; position: absolute; left: 50%; top: calc(170px + var(--sat)); transform: translateX(-50%);
     padding: 6px 12px; border-radius: 10px; background: var(--violet); color: var(--ink); font-weight: 700; font-size: 13px;
@@ -108,7 +135,7 @@
     #status { max-width: calc(100% - 224px - var(--sal) - var(--sar)); }
     #lvl { font-size: 13px; }
     #center { top: calc(118px + var(--sat)); width: 86%; }
-    #ammo { max-width: calc(100% - 120px); left: calc(50% + 46px); }
+    #ammo { max-width: calc(100% - 196px); }
   }
   @media (max-height: 480px) {
     #hint { display: none; }
@@ -183,6 +210,9 @@
     </button>
   </div>
   <button id="hideBtn" aria-label="Hold to hide">HIDE<small class="kb">hold / space</small><small class="touch">hold</small></button>
+  <button id="raidBtn" class="pad" aria-label="Leave the slingshot and raid the trash cans" hidden>RAID<small class="kb">or A</small></button>
+  <button id="trapBtn" class="pad" aria-label="Rip a trash bag open to trip a guard" hidden>TRAP<small class="kb">E</small></button>
+  <div id="stick" aria-hidden="true"><div id="knob"></div></div>
   <div id="overlay" class="show"><div class="panel"><h1>Trash Panda Heist</h1><p>Sneaking into the alley...</p></div></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>

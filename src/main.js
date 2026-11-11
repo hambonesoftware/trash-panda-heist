@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import { createView, toon } from './gfx.js';
 import { buildWorld } from './world.js';
 import { buildRaccoon, buildWorker, buildBand, boxMesh, ammoMesh } from './characters.js';
+import { buildNav, newAgent, stepAgent, route, standingSpot, ropeSag } from './maze.js';
+import { buildMaze, slickMesh, sackMesh } from './mazeart.js';
 import { ik2 } from './rig.js';
 import { initAudio, sfx, toggleMute, isMuted } from './audio.js';
 import { rand, lerp, clamp, damp, smooth, angleDamp, seedRandom } from './util.js';
 import {
   G, STEP, STEP_MS, GRAV, AIR, RS, CAN_X, RAC_X, ZONE, DUMP_TOP, DOOR_X, DOCK_Y, DOCK_Z, STAND_X,
-  MAX_PULL, MIN_PULL, POWER, SPEC, AMMO, LEVELS,
+  MAX_PULL, MIN_PULL, POWER, SPEC, AMMO, LEVELS, MAZE, ROAM, PERCH_X, ROPE_UP,
 } from './config.js';
 import { makeBot } from './bot.js';
 
@@ -18,9 +20,12 @@ const TOUCH = window.matchMedia && matchMedia('(pointer: coarse)').matches;
 const HIDE_HOW = TOUCH ? 'Hold the HIDE button' : 'Hold SPACE (or the HIDE button)';
 
 const canvas = $('game'), wrap = $('wrap'), hideBtn = $('hideBtn'), overlay = $('overlay');
+const raidBtn = $('raidBtn'), trapBtn = $('trapBtn'), stickEl = $('stick'), knobEl = $('knob');
 const view = createView(canvas);
 const { scene, camera } = view;
 const world = buildWorld(scene, view);
+const nav = buildNav();
+const maze = buildMaze(scene, nav);
 
 // ---------- characters ----------
 const rac = buildRaccoon();
@@ -44,7 +49,28 @@ const wk = Object.assign(buildWorker(), {
 scene.add(wk.outer);
 wk.outer.visible = false;
 
-const rc = { mode: 'stand', modeT: 0, hide: 0, invuln: 0, aimW: 0, tailA: 0, tailV: 0, blink: 2, lastX: RAC_X, splashed: false, releaseT: 0 };
+const rc = { mode: 'stand', modeT: 0, hide: 0, invuln: 0, aimW: 0, tailA: 0, tailV: 0, blink: 2, lastX: RAC_X, splashed: false, releaseT: 0, offX: 0, ropePh: 0 };
+
+// ---------- the maze: raccoon on foot, guards, cans ----------
+const ra = newAgent(nav, RAC_X, 'g');
+const RAC_MOVE = { run: ROAM.run, climb: ROAM.climb, rope: ROAM.rope, grav: ROAM.grav, xMin: ROAM.xMin, xMax: 336, canRope: true, canFall: true };
+const sackM = sackMesh();
+rac.sackAnchor.add(sackM);
+const GUARD_LOOK = { SHIRT: 0x3d4f9c, APRON: 0x23283d, CAP: 0x1c2140 };
+const guards = MAZE.guards.map((def, i) => {
+  const g = Object.assign(buildWorker(GUARD_LOOK), { def, i, a: newAgent(nav, def.x, def.floor), state: 'patrol', t: 0, dur: 0, dir: i % 2 ? -1 : 1, last: null, lost: 0, active: false, faceY: 0 });
+  g.outer.scale.setScalar(0.86);
+  g.outer.visible = false;
+  scene.add(g.outer);
+  return g;
+});
+const slicks = [];
+const stashPile = new THREE.Group();
+stashPile.position.set(232, 0, 44);
+scene.add(stashPile);
+const peel = { on: false, x: 0, mesh: ammoMesh('banana') };
+peel.mesh.visible = false;
+scene.add(peel.mesh);
 
 // ---------- physics ----------
 const engine = Engine.create();
@@ -66,16 +92,20 @@ let state = 'menu', pausedFrom = null, levelIdx = 0, level = LEVELS[0];
 let time = 0, levelTime = 0, hearts = 3, throws = 0, ammoIdx = 0, ammoOverride = null;
 let throwCool = 0, clearT = 0, endT = 0, shake = 0, frames = 0, running = true;
 let hideKey = false, hideBtnDown = false, aim = null, spottedLatch = false, taught = 0, lastStretch = 0;
+let where = 'perch', day = 1, dayK = 1, hourNow = 0, stash = [], sack = [], inCan = null, rumCan = null, rumT = 0, trapCool = 0, botMove = null, chased = false;
+const keys = { l: false, r: false, u: false, d: false };
+const stick = { id: null, ox: 0, oy: 0, mx: 0, my: 0 };
 const boxes = [], projs = [], flying = [], parts = [], killQueue = [];
 const pouch = { x: REST.x, wy: REST.wy, vx: 0, vy: 0 };
-const cam = { D: 3000, off: 0, zoom: 1 };
+const cam = { D: 3000, off: 0, zoom: 1, up: 0, aspect: 1.78 };
 let closeUp = null;
 
-const hideHeld = () => hideKey || hideBtnDown;
-const ammoAt = i => ammoOverride || level.ammo[i % level.ammo.length];
+const hideHeld = () => hideKey || hideBtnDown || (where === 'perch' && keys.d);
+const curAmmo = () => ammoOverride || stash[0] || null;
+const nextAmmo = () => ammoOverride || stash[1] || null;
 const pullAmount = () => Math.hypot(pouch.x - REST.x, pouch.wy - REST.wy);
 const pullFrac = () => Math.min(1, pullAmount() / MAX_PULL);
-const canAim = () => state === 'play' && rac.outer.visible && rc.hide < 0.05 && throwCool <= 0 && !hideHeld() && (rc.mode === 'stand' || rc.mode === 'release');
+const canAim = () => state === 'play' && where === 'perch' && !!curAmmo() && rac.outer.visible && rc.hide < 0.05 && throwCool <= 0 && !hideHeld() && Math.abs(rc.offX) < 6 && (rc.mode === 'stand' || rc.mode === 'release');
 
 // ---------- meshes for aim preview / held ammo / trail ----------
 const dotMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.55, 1.3), toneMapped: false });
@@ -97,12 +127,23 @@ for (let i = 0; i < 50; i++) {
 let trailIdx = 0, trailTick = 0, trailProj = null;
 let held = null, heldType = '';
 function setHeld() {
-  const type = ammoAt(ammoIdx);
-  if (type === heldType && held) return;
+  const type = curAmmo() || '';
+  if (type === heldType) return;
   if (held) scene.remove(held);
-  held = ammoMesh(type);
+  held = type ? ammoMesh(type) : null;
   heldType = type;
-  scene.add(held);
+  if (held) scene.add(held);
+}
+function showStash() {
+  while (stashPile.children.length) stashPile.remove(stashPile.children[0]);
+  stash.slice(1, 13).forEach((type, i) => {
+    const m = ammoMesh(type);
+    m.scale.setScalar(0.7);
+    m.position.set(-(i % 4) * 26 + (Math.floor(i / 4) % 2) * 12, 12 + Math.floor(i / 4) * 20, (i % 3) * 9 - 9);
+    m.rotation.z = (i * 1.7) % 1.2 - 0.6;
+    stashPile.add(m);
+  });
+  setHeld();
 }
 
 // ---------- bodies ----------
@@ -163,7 +204,7 @@ function hit(self, other, rel, vOther) {
     o.dead = true;
     killQueue.push(o);
     const p = other.gameObj;
-    if (p && p.kind === 'proj') p.punch = { x: vOther.x * 0.55, y: vOther.y * 0.55 };
+    if (p && p.kind === 'proj') { const k = AMMO[p.type].pierce || 0.55; p.punch = { x: vOther.x * k, y: vOther.y * k }; }
   } else if (!o.worn && o.hp < o.max * 0.55) {
     o.worn = true;
     o.skin.material = toon(SPEC[o.type].hurt);
@@ -220,7 +261,22 @@ function loadLevel(i) {
     for (const t of types) { addBox(t, x, y); y -= SPEC[t].h; }
   }
   hearts = 3; throws = 0; ammoIdx = 0; ammoOverride = null; throwCool = 0; clearT = 0; endT = 0; levelTime = 0; aim = null;
-  Object.assign(rc, { mode: 'stand', modeT: 0, hide: 0, invuln: 0, aimW: 0, splashed: false });
+  dayK = 1 + 0.12 * (day - 1);
+  where = 'perch'; stash = level.stash.slice(); sack = []; inCan = null; rumCan = null; rumT = 0; trapCool = 0; chased = false; botMove = null;
+  hourNow = level.hour; world.setTime(hourNow);
+  Object.assign(ra, newAgent(nav, RAC_X, 'g'));
+  for (const s of slicks) scene.remove(s.mesh);
+  slicks.length = 0;
+  peel.on = false; peel.mesh.visible = false;
+  for (const c of maze.cans) { c.loot = c.full.slice(); c.refill = 0; c.hideAmt = 0; c.show(); }
+  guards.forEach((g, n) => {
+    g.active = n < level.guards;
+    g.outer.visible = g.active;
+    Object.assign(g, { a: newAgent(nav, g.def.x, g.def.floor), state: 'patrol', t: 0, last: null, lost: 0, dir: n % 2 ? -1 : 1, blind: 0, stuck: 0 });
+    g.rig.play('walk', 0);
+  });
+  showStash();
+  Object.assign(rc, { mode: 'stand', modeT: 0, hide: 0, invuln: 0, aimW: 0, splashed: false, offX: 0 });
   Object.assign(pouch, { x: REST.x, wy: REST.wy, vx: 0, vy: 0 });
   rac.outer.visible = true;
   rac.outer.position.copy(STAND);
@@ -231,7 +287,6 @@ function loadLevel(i) {
   Object.assign(wk, { state: 'idle', timer: level.first, alert: 0, cool: 0, door: 0, react: null, carrying: false, watching: false });
   setCarry(null); setGrab(null);
   wk.outer.visible = false;
-  setHeld();
 }
 
 function startLevel(i) {
@@ -289,21 +344,43 @@ const liveFish = () => projs.find(o => o.type === 'fish' && !o.split && !o.hitAt
 
 function fire() {
   const p = { x: pouch.x, wy: pouch.wy }, v = launchVelocity(p);
-  spawnProj(ammoAt(ammoIdx), p.x, G - p.wy, v.x, v.y, LAUNCH.z);
+  spawnProj(curAmmo(), p.x, G - p.wy, v.x, v.y, LAUNCH.z);
+  if (!ammoOverride) stash.shift();
   throws++; ammoIdx++; throwCool = 0.5; taught |= 1;
   pouch.vx = (LAUNCH.x - p.x) * 16; pouch.vy = (LAUNCH.wy - p.wy) * 16;
   rc.mode = 'release'; rc.modeT = 0; rc.releaseT = 0;
   rac.rig.play('release', 0.04, 1, true);
   for (const d of trail) d.visible = false;
   trailIdx = 0; trailTick = 0; trailProj = projs[projs.length - 1];
-  setHeld();
+  showStash();
   sfx.snap();
   buzz(10);
 }
 
+function setStick(e) {
+  const R = 46, dx = e.clientX - stick.ox, dy = e.clientY - stick.oy, len = Math.hypot(dx, dy) || 1, k = Math.min(1, len / R);
+  stick.mx = (dx / len) * k; stick.my = (-dy / len) * k;
+  knobEl.style.transform = `translate(${(dx / len) * k * R}px, ${(dy / len) * k * R}px)`;
+}
+function endStick() {
+  stick.id = null; stick.mx = stick.my = 0;
+  stickEl.classList.remove('on');
+}
 canvas.addEventListener('pointerdown', e => {
   initAudio();
   if (state !== 'play') return;
+  if (where === 'roam') {
+    // anywhere on the screen becomes a thumbstick while the raccoon is on foot
+    if (stick.id !== null) return;
+    stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY; stick.mx = stick.my = 0;
+    const r = wrap.getBoundingClientRect();
+    stickEl.style.left = (e.clientX - r.left) + 'px'; stickEl.style.top = (e.clientY - r.top) + 'px';
+    knobEl.style.transform = 'translate(0px, 0px)';
+    stickEl.classList.add('on');
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
+    e.preventDefault();
+    return;
+  }
   const fish = liveFish();
   if (fish) { splitFish(fish); return; }
   if (!canAim()) return;
@@ -322,6 +399,7 @@ canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
 });
 canvas.addEventListener('pointermove', e => {
+  if (stick.id !== null && e.pointerId === stick.id) { setStick(e); return; }
   if (!aim || e.pointerId !== aim.id) return;
   const c = constrainPouch((e.clientX - aim.cx) * aim.perPx, -(e.clientY - aim.cy) * aim.perPx);
   pouch.x = c.x; pouch.wy = c.wy; pouch.vx = pouch.vy = 0;
@@ -330,6 +408,7 @@ canvas.addEventListener('pointermove', e => {
   lastStretch = k;
 });
 function endAim(e) {
+  if (stick.id !== null && e.pointerId === stick.id) { endStick(); return; }
   if (!aim || e.pointerId !== aim.id) return;
   const ok = e.type === 'pointerup' && state === 'play' && pullAmount() >= MIN_PULL && canAim();
   aim = null;
@@ -340,11 +419,14 @@ canvas.addEventListener('pointerup', endAim);
 canvas.addEventListener('pointercancel', endAim);
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-const HIDE_KEYS = new Set(['Space', 'ArrowDown', 'KeyS']);
+const MOVE_KEYS = { KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', KeyW: 'u', ArrowUp: 'u', KeyS: 'd', ArrowDown: 'd' };
+const TRAP_KEYS = new Set(['KeyE', 'KeyX', 'KeyF']);
 window.addEventListener('keydown', e => {
-  if (HIDE_KEYS.has(e.code)) { hideKey = true; e.preventDefault(); return; }
+  if (e.code === 'Space') { hideKey = true; e.preventDefault(); return; }
+  if (MOVE_KEYS[e.code]) { keys[MOVE_KEYS[e.code]] = true; e.preventDefault(); return; }
   if (e.repeat) return;
-  if (e.code === 'KeyR' && state !== 'menu') startLevel(levelIdx);
+  if (TRAP_KEYS.has(e.code)) dropSlick();
+  else if (e.code === 'KeyR' && state !== 'menu') startLevel(levelIdx);
   else if (e.code === 'KeyM') toggleSound();
   else if (e.code === 'KeyP' || e.code === 'Escape') setPaused(state !== 'paused');
   else if (e.code === 'Enter' && overlay.classList.contains('show')) {
@@ -352,8 +434,11 @@ window.addEventListener('keydown', e => {
     if (b) { e.preventDefault(); b.click(); }
   }
 });
-window.addEventListener('keyup', e => { if (HIDE_KEYS.has(e.code)) hideKey = false; });
-window.addEventListener('blur', () => { hideKey = false; hideBtnDown = false; });
+window.addEventListener('keyup', e => {
+  if (e.code === 'Space') hideKey = false;
+  if (MOVE_KEYS[e.code]) keys[MOVE_KEYS[e.code]] = false;
+});
+window.addEventListener('blur', () => { hideKey = false; hideBtnDown = false; keys.l = keys.r = keys.u = keys.d = false; endStick(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && !TEST) setPaused(true); });
 
 hideBtn.addEventListener('pointerdown', e => {
@@ -364,6 +449,9 @@ hideBtn.addEventListener('pointerdown', e => {
 });
 for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) hideBtn.addEventListener(ev, () => { hideBtnDown = false; });
 hideBtn.addEventListener('contextmenu', e => e.preventDefault());
+raidBtn.addEventListener('click', () => { initAudio(); goRoam(); });
+trapBtn.addEventListener('pointerdown', e => { initAudio(); dropSlick(); e.preventDefault(); });
+for (const b of [raidBtn, trapBtn]) b.addEventListener('contextmenu', e => e.preventDefault());
 
 function toggleSound() {
   initAudio();
@@ -394,9 +482,12 @@ overlay.addEventListener('click', e => {
   if (!btn) return;
   initAudio();
   const act = btn.dataset.act;
-  if (act === 'play') startLevel(0);
+  if (act === 'play') { day = 1; startLevel(0); }
   else if (act === 'retry') startLevel(levelIdx);
-  else if (act === 'next') startLevel((levelIdx + 1) % LEVELS.length);
+  else if (act === 'next') {
+    if (levelIdx + 1 >= LEVELS.length) day++;
+    startLevel((levelIdx + 1) % LEVELS.length);
+  }
   else if (act === 'resume') setPaused(false);
 });
 
@@ -409,25 +500,28 @@ function hideOverlay() { overlay.classList.remove('show'); }
 function showMenu() {
   showOverlay(
     '<h1>Trash Panda Heist</h1>' +
-    '<p>Dinner is in the dumpster, but the night crew keeps stacking boxes around it.</p>' +
-    '<p><b>Pull the slingshot back and let go</b> to fling trash. Drag from the raccoon, or anywhere on the left side.</p>' +
-    '<p><b>' + HIDE_HOW + '</b> to duck into the can when the back door light blinks. Get spotted and they throw boxes at you.</p>' +
-    '<p>Clear every box from the glowing brackets and the raccoon dives in.</p>' +
+    '<p>A meal waits in the dumpster every six hours, but the crew keeps stacking boxes around it.</p>' +
+    '<p><b>Raid the trash cans</b> up the fire escapes: ' + (TOUCH ? 'tap RAID, then drag anywhere to run and climb' : 'A/D run, W/S climb, or click RAID') + '. Stand still at a can to dig. Everything goes in your sack.</p>' +
+    '<p><b>Haul it back to the slingshot</b>, pull back and let go to smash the boxes.</p>' +
+    '<p><b>' + HIDE_HOW + '</b> to duck into a can when someone is coming. ' + (TOUCH ? 'TRAP' : 'E') + ' rips a bag open to trip a guard. Guards cannot follow you along the clotheslines.</p>' +
     '<div class="row"><button data-act="play">Play</button></div>');
 }
+const clock = h => { const hh = ((Math.floor(h) % 24) + 24) % 24, m = Math.floor((h % 1) * 60); return (hh % 12 || 12) + ':' + String(m).padStart(2, '0') + (hh < 12 ? ' AM' : ' PM'); };
 function showWin() {
   const stars = throws <= level.par ? 3 : throws <= level.par + 5 ? 2 : 1;
   const last = levelIdx === LEVELS.length - 1;
+  const nxt = LEVELS[(levelIdx + 1) % LEVELS.length];
   showOverlay(
-    '<h1>' + (last ? 'Dumpster Royalty!' : 'Dinner is served!') + '</h1>' +
+    '<h1>' + level.name + ' eaten!</h1>' +
     '<div class="stars">' + [1, 2, 3].map(n => '<span class="' + (n <= stars ? '' : 'off') + '">&#9733;</span>').join('') + '</div>' +
     '<p>' + throws + ' throws (3 stars at ' + level.par + ' or fewer) &middot; ' + Math.round(levelTime) + ' seconds &middot; ' + hearts + ' of 3 hearts left</p>' +
-    '<div class="row"><button data-act="next">' + (last ? 'Play again' : 'Next level') + '</button><button class="alt" data-act="retry">Replay</button></div>');
+    '<p>Six hours later it is <b>' + clock(nxt.hour) + '</b>' + (last ? ' on day ' + (day + 1) + ', and the crew is faster.' : '.') + ' Time for ' + nxt.name.toLowerCase() + '.</p>' +
+    '<div class="row"><button data-act="next">Run to ' + nxt.name.toLowerCase() + '</button><button class="alt" data-act="retry">Replay</button></div>');
 }
 function showLose() {
   showOverlay(
     '<h1>Busted!</h1>' +
-    '<p>The night crew chased the raccoon off. Duck into the can as soon as the door light blinks.</p>' +
+    '<p>The crew chased the raccoon off on day ' + day + '. Duck into a can when someone is coming, and trip guards with a ripped bag.</p>' +
     '<div class="row"><button data-act="retry">Try again</button></div>');
 }
 
@@ -483,10 +577,10 @@ function landPlaced(f) {
 
 function hurtRaccoon() {
   hearts--;
-  rc.invuln = 1.5;
+  rc.invuln = where === 'roam' ? 2.4 : 1.5;
   shake = 16;
   aim = null;
-  burst(rac.outer.position.x, 90, 30, 10, 0xd49d5e, 280, 12);
+  burst(rac.outer.position.x, rac.outer.position.y + 90, 30, 10, 0xd49d5e, 280, 12);
   sfx.hurt();
   buzz([40, 30, 60]);
   rc.mode = 'hit'; rc.modeT = 0;
@@ -524,13 +618,231 @@ function updateFlying(dt) {
 const FACE_LEFT = Math.PI + 0.35, FACE_RIGHT = -0.35, FACE_OUT = -Math.PI / 2, FACE_IN = Math.PI / 2;
 const _v = new THREE.Vector3();
 
+// ---------- on foot in the maze ----------
+function moveInput() {
+  if (botMove) return botMove;
+  let mx = (keys.r ? 1 : 0) - (keys.l ? 1 : 0), my = (keys.u ? 1 : 0) - (keys.d ? 1 : 0);
+  if (stick.id !== null) {
+    if (Math.abs(stick.mx) > 0.38) mx = Math.sign(stick.mx);
+    if (Math.abs(stick.my) > 0.5) my = Math.sign(stick.my);
+  }
+  return { mx, my };
+}
+
+function goRoam() {
+  if (state !== 'play' || where !== 'perch' || rc.hide > 0.05 || rc.mode === 'hit') return false;
+  where = 'roam';
+  aim = null;
+  Object.assign(ra, newAgent(nav, RAC_X - 24, 'g'));
+  ra.face = -1;
+  rc.mode = 'stand';
+  taught |= 4;
+  return true;
+}
+
+function enterPerch() {
+  where = 'perch';
+  rc.offX = ra.x - STAND.x;
+  rc.mode = 'stand'; rc.modeT = 0;
+  inCan = null; rumCan = null; rumT = 0;
+  endStick();
+  if (sack.length) {
+    stash.push(...sack);
+    burst(250, 40, 40, 8, 0xf2c14e, 200, 9);
+    sack = [];
+    sfx.bank();
+    taught |= 8;
+  }
+  showStash();
+}
+
+function nearCan(reach) {
+  if (ra.mode !== 'floor') return null;
+  let best = null;
+  for (const c of maze.cans) if (c.floor === ra.floor && Math.abs(c.x - ra.x) < reach && (!best || Math.abs(c.x - ra.x) < Math.abs(best.x - ra.x))) best = c;
+  return best;
+}
+
+// Rip a trash bag open at your feet. The next guard to step in it goes down.
+function dropSlick() {
+  if (state !== 'play' || where !== 'roam' || ra.mode !== 'floor' || inCan || trapCool > 0) return false;
+  const mesh = slickMesh();
+  mesh.position.set(ra.x, ra.h, 10);
+  scene.add(mesh);
+  slicks.push({ x: ra.x, floor: ra.floor, life: ROAM.trapLife, mesh });
+  trapCool = ROAM.trapCool;
+  burst(ra.x, ra.h + 20, 20, 6, 0x3f4558, 160, 8);
+  sfx.rip();
+  taught |= 16;
+  return true;
+}
+
+function makeNoise(x, floor) {
+  for (const g of guards) {
+    if (!g.active || (g.state !== 'patrol' && g.state !== 'search')) continue;
+    if (Math.abs(g.a.x - x) + Math.abs(g.a.h - floor.h) > ROAM.noise) continue;
+    g.state = 'investigate'; g.t = 0; g.last = { x, floor };
+  }
+}
+
+function updateRoam(dt) {
+  const inp = state === 'play' && rc.mode !== 'hit' ? moveInput() : { mx: 0, my: 0 };
+  const wantHide = hideHeld() && state === 'play';
+  if (inCan && !wantHide) { inCan.shake = 0.6; inCan = null; }
+  else if (!inCan && wantHide && ra.mode === 'floor') {
+    const c = nearCan(60);
+    if (c) { inCan = c; c.shake = 1; ra.x = c.x; rumCan = null; rumT = 0; sfx.duck(); taught |= 2; }
+  }
+  if (inCan) return;
+
+  stepAgent(nav, ra, inp, dt, RAC_MOVE);
+  if (ra.landed) { ra.landed = false; sfx.thud(7); burst(ra.x, ra.h + 4, 24, 4, 0x8a8fa8, 110, 6, 300); }
+
+  // stand still beside a can to dig through it; every piece goes in the sack
+  const c = !inp.mx && !inp.my ? nearCan(38) : null;
+  if (c && c.loot.length && state === 'play') {
+    if (rumCan !== c) { rumCan = c; rumT = 0; }
+    rumT += dt; c.shake = Math.max(c.shake, 0.7);
+    if (rumT >= ROAM.rummage) {
+      rumT = 0;
+      const type = c.loot.shift();
+      sack.push(type);
+      c.show();
+      if (!c.loot.length) c.refill = ROAM.refill / dayK;
+      burst(c.x, c.floor.h + 92, 0, 4, 0xdfe3ee, 150, 6);
+      sfx.grab();
+      buzz(8);
+      makeNoise(c.x, c.floor);
+    }
+  } else { rumCan = null; rumT = 0; }
+
+  if (ra.mode === 'floor' && ra.floor.id === 'g' && ra.x >= PERCH_X && state === 'play') enterPerch();
+}
+
+function guardSees(g) {
+  if (where !== 'roam' || inCan || state !== 'play' || g.blind > 0 || ra.x > ROAM.safeX) return false;
+  const dx = ra.x - g.a.x, dh = ra.h - g.a.h;
+  if (Math.hypot(dx, dh) < 190) return true;
+  return Math.abs(dh) < 60 && Math.abs(dx) < 540 && (Math.sign(dx) === g.a.face || Math.abs(dx) < 150);
+}
+
+function caught(g) {
+  if (sack.length) { burst(ra.x, ra.h + 70, 24, 12, 0xb89a62, 300, 10); sack = []; }
+  hurtRaccoon();
+  g.state = 'gloat'; g.t = 0; g.dur = 1.5;
+  g.rig.play('grabbed', 0.08, 1, true);
+}
+
+function updateGuards(dt) {
+  const playing = state === 'play';
+  const gs = level.guardSpeed * dayK;
+  let anyChase = false;
+  for (const g of guards) {
+    if (!g.active) continue;
+    const a = g.a;
+    g.t += dt;
+    g.blind = Math.max(0, (g.blind || 0) - dt);
+    let inp = { mx: 0, my: 0 }, speed = 96 * gs, clip = 'idle', clipSpeed = 1;
+    if (g.state === 'stun' || g.state === 'gloat') {
+      clip = null;
+      if (g.t >= g.dur) { g.state = 'search'; g.t = 0; }
+    } else if (playing) {
+      const sees = guardSees(g);
+      if (sees) {
+        if (g.state !== 'chase') { g.state = 'chase'; if (!chased) sfx.spotted(); }
+        g.last = standingSpot(nav, ra); g.lost = 0;
+      }
+      if (g.state === 'chase') {
+        anyChase = true;
+        speed = 218 * gs; clip = 'run';
+        if (!sees) { g.lost += dt; if (g.lost > 2.6) { g.state = 'search'; g.t = 0; } }
+        inp = route(nav, a, g.last);
+        if (!sees && a.mode === 'floor' && a.floor === g.last.floor && Math.abs(a.x - g.last.x) < 12) { g.state = 'search'; g.t = 0; }
+      } else if (g.state === 'investigate') {
+        speed = 150 * gs; clip = 'walk'; clipSpeed = 1.4;
+        inp = route(nav, a, g.last);
+        if ((a.mode === 'floor' && a.floor === g.last.floor && Math.abs(a.x - g.last.x) < 14) || g.t > 9) { g.state = 'search'; g.t = 0; }
+      } else if (g.state === 'search') {
+        if (g.t > 1.5) g.state = 'patrol';
+      } else {
+        clip = 'walk';
+        const home = nav.byId[g.def.floor];
+        if (a.mode === 'floor' && a.floor === home) {
+          if (a.x <= g.def.x0) g.dir = 1;
+          if (a.x >= g.def.x1) g.dir = -1;
+          inp = { mx: g.dir, my: 0 };
+        } else inp = route(nav, a, { x: g.def.x, floor: home });
+      }
+      stepAgent(nav, a, inp, dt, { run: speed, climb: 150 * gs, rope: 0, grav: ROAM.grav, xMin: ROAM.xMin, xMax: ROAM.guardMaxX, canRope: false, canFall: false });
+      if (a.blocked && g.state === 'patrol') g.dir *= -1;
+      // can see him but cannot get to him (end of the beat, or he is out on a clothesline): give up and look around
+      g.stuck = g.state === 'chase' && !a.moving && a.mode === 'floor' ? (g.stuck || 0) + dt : 0;
+      if (g.stuck > ROAM.giveUp) { g.state = 'search'; g.t = 0; g.stuck = 0; g.blind = ROAM.blind; }
+      if (a.mode === 'ladder') { clip = 'climb'; clipSpeed = a.climb ? 1 : 0; }
+      else if (!a.moving && clip !== 'idle') clip = 'idle';
+
+      if (a.mode === 'floor') {
+        // wider than a guard's reach, so standing on your own slick is safe
+        const i = slicks.findIndex(s => s.floor === a.floor && Math.abs(s.x - a.x) < 46);
+        if (i >= 0) {
+          scene.remove(slicks[i].mesh); slicks.splice(i, 1);
+          g.state = 'stun'; g.t = 0; g.dur = ROAM.stun;
+          g.rig.play('slip', 0.06, 1, true);
+          burst(a.x, a.h + 30, 10, 8, 0x3f4558, 220, 9);
+          sfx.slip(); shake = Math.max(shake, 4);
+          clip = null;
+        }
+      }
+      if (g.state === 'chase' && where === 'roam' && !inCan && rc.invuln <= 0 && Math.abs(ra.x - a.x) < 38 && Math.abs(ra.h - a.h) < 80) { caught(g); clip = null; }
+    }
+    if (clip) g.rig.play(clip, 0.18, clipSpeed);
+    if (state !== 'paused') g.rig.update(dt);
+    const want = a.mode === 'ladder' ? FACE_IN : a.face > 0 ? FACE_RIGHT : FACE_LEFT;
+    g.faceY = angleDamp(g.faceY, want, 10, dt);
+    g.root.rotation.y = g.faceY;
+    g.outer.position.set(a.x, a.h, a.mode === 'ladder' ? -18 : 2);
+    const hot = g.state === 'chase', curious = g.state === 'investigate' || g.state === 'search';
+    g.bang.visible = hot || curious;
+    g.bang.scale.setScalar(hot ? 1.3 : 0.9);
+    g.bang.lookAt(camera.position.x, g.bang.getWorldPosition(_v).y, camera.position.z);
+    g.bangMat.color.setRGB(hot ? 3 : 2.6, hot ? 0.7 : 2.1, 0.5);
+  }
+  chased = anyChase;
+}
+
+function updateMaze(dt) {
+  trapCool = Math.max(0, trapCool - dt);
+  for (const c of maze.cans) {
+    c.hideAmt = damp(c.hideAmt, c === inCan ? 1 : 0, 12, dt);
+    if (!c.loot.length && state === 'play') { c.refill -= dt; if (c.refill <= 0) { c.loot = c.full.slice(); c.show(); } }
+  }
+  for (let i = slicks.length - 1; i >= 0; i--) {
+    const s = slicks[i];
+    if (state === 'play') s.life -= dt;
+    s.mesh.scale.setScalar(Math.min(1, s.life / 0.6));
+    if (s.life <= 0) { scene.remove(s.mesh); slicks.splice(i, 1); }
+  }
+  for (const l of maze.lamps) { l.light.intensity = 420 * world.night; l.bulb.visible = world.night > 0.2; }
+  updateGuards(dt);
+  maze.update(dt, time);
+  const n = Math.min(sack.length, 10);
+  sackM.visible = n > 0 && where === 'roam';
+  sackM.scale.setScalar(0.55 + n * 0.11);
+  const perch = where === 'perch' && state === 'play';
+  raidBtn.hidden = !perch;
+  trapBtn.hidden = !(where === 'roam' && state === 'play');
+  trapBtn.classList.toggle('cool', trapCool > 0);
+  hideBtn.classList.toggle('active', where === 'roam' ? !!inCan : rc.hide > 0.5);
+}
+
+
 function workerAnim() {
   const r = wk.rig, sp = level.speed / 170;
   if (wk.react === 'spot') return r.play('spot', 0.12);
   if (wk.react === 'throw') return null;
   switch (wk.state) {
     case 'emerge': case 'out': return r.play(wk.carrying ? 'carryWalk' : 'walk', 0.2, sp);
-    case 'lob': return null;
+    case 'lob': case 'slip': return null;
     case 'linger': return r.play('idle', 0.3);
     case 'return': case 'enter': return r.play('walk', 0.25, sp);
     default: return r.play(wk.carrying ? 'carryIdle' : 'idle', 0.3);
@@ -538,7 +850,8 @@ function workerAnim() {
 }
 
 function updateWorker(dt) {
-  const L = level, playing = state === 'play';
+  const base = level, playing = state === 'play';
+  const L = dayK === 1 ? base : { ...base, speed: base.speed * dayK, interval: base.interval / dayK, spot: base.spot / dayK };
   let doorOpen = wk.state !== 'idle' && wk.state !== 'warn';
   let moving = false;
   wk.cool = Math.max(0, wk.cool - dt);
@@ -591,7 +904,16 @@ function updateWorker(dt) {
   }
 
   const watching = playing && ['emerge', 'out', 'lob', 'linger'].includes(wk.state);
-  const exposed = rc.hide < 0.6 && rac.outer.visible;
+  const exposed = where === 'perch' && rc.hide < 0.6 && rac.outer.visible;
+  if (peel.on && playing && wk.state === 'out' && Math.abs(wk.x - peel.x) < 34) {
+    // stepped on a banana peel: drops the box and goes back inside
+    peel.on = false; peel.mesh.visible = false;
+    if (wk.carrying) { burst(wk.x, DOCK_Y + 150, DOCK_Z, 9, SPEC[wk.type].color, 240, 12); setCarry(null); }
+    wk.state = 'slip'; wk.timer = 2.2; wk.react = null; wk.alert = 0;
+    wk.rig.play('slip', 0.06, 1, true);
+    sfx.slip();
+  }
+  if (wk.state === 'slip') { if (playing) wk.timer -= dt; if (wk.timer <= 0) wk.state = 'return'; }
   if (watching && exposed) {
     wk.alert = Math.min(1, wk.alert + dt / L.spot);
     if (!spottedLatch) { spottedLatch = true; sfx.spotted(); }
@@ -651,12 +973,32 @@ function updateRaccoon(dt) {
     rac.sling.group.visible = false;
     g.visible = true;
     g.rotation.set(0, 0, 0);
-    if (state === 'won' || endT >= 2.2) {
+    if (state === 'won') {
+      g.visible = false;
+    } else if (endT >= 5.3) {
+      // full and happy: off to the right, toward the next meal
+      rig.play('run', 0.1, 1.2);
+      g.scale.setScalar(RS);
+      g.position.set(lerp(1290, 1900, (endT - 5.3) / 1.3), 0, 80);
+      rac.root.rotation.y = angleDamp(rac.root.rotation.y, -0.2, 12, dt);
+      if (endT >= 6.6) { state = 'won'; sfx.win(); showWin(); }
+    } else if (endT >= 4.7) {
+      rig.play('leap', 0.06);
+      const k = (endT - 4.7) / 0.6;
+      g.scale.setScalar(RS * lerp(0.85, 1, k));
+      g.position.set(lerp(1050, 1290, k), lerp(112, 0, k) + Math.sin(k * Math.PI) * 150, lerp(0, 80, k));
+      rac.root.rotation.y = angleDamp(rac.root.rotation.y, -0.2, 10, dt);
+    } else if (endT >= 2.2) {
+      // eating while the clock runs six hours ahead
       rig.play('cheer', 0.2);
-      g.position.set(1050, 112 + (state === 'won' ? Math.sin(time * 5) * 3 : 0), 0);
+      g.position.set(1050, 112 + Math.sin(time * 9) * 3, 0);
       g.scale.setScalar(RS * 0.85);
       rac.root.rotation.y = angleDamp(rac.root.rotation.y, -0.9, 6, dt);
-      if (state === 'winning' && endT >= 2.9) { state = 'won'; sfx.win(); showWin(); }
+      const k = clamp((endT - 2.4) / 2.1, 0, 1), before = Math.floor(hourNow);
+      hourNow = level.hour + 6 * smooth(k);
+      world.setTime(hourNow);
+      if (Math.floor(hourNow) !== before) sfx.tick();
+      if (Math.floor(endT * 5) !== Math.floor((endT - dt) * 5) && k < 1) { burst(1050 + rand(-40, 40), 180, 10, 2, 0xf2c14e, 150, 7); sfx.munch(); }
     } else if (endT < 1.0) {
       rig.play('run', 0.15);
       const k = endT / 1.0;
@@ -691,6 +1033,48 @@ function updateRaccoon(dt) {
   }
   if (state === 'paused') return;
 
+  if (where === 'roam') {
+    band.setVisible(false);
+    rac.sling.group.visible = false;
+    g.scale.setScalar(RS);
+    g.rotation.set(0, 0, 0);
+    g.visible = !inCan && (rc.invuln <= 0 || Math.sin(time * 40) > -0.3);
+    if (rc.mode === 'hit' && rc.modeT > 0.62) rc.mode = 'stand';
+    let y = ra.h, z = 24, faceY = ra.face > 0 ? -0.3 : Math.PI + 0.3, lineY = 0;
+    if (ra.mode === 'rope') {
+      lineY = ra.rope.h + ROPE_UP - ropeSag(ra.rope, ra.x);
+      y = lineY - 142; z = 34;
+      if (ra.moving) rc.ropePh += dt * 9;
+      rig.play('hang', 0.12, ra.moving ? 1.5 : 0.45);
+    } else if (rc.mode === 'hit') { /* keep the hit reaction */ }
+    else if (ra.mode === 'ladder') { rig.play('climb', 0.1, ra.climb ? 1.25 : 0); faceY = Math.PI / 2; z = -8; }
+    else if (ra.mode === 'fall') rig.play('fall', 0.08);
+    else if (rumCan) { rig.play('rummage', 0.1); faceY = rumCan.x >= ra.x ? -0.5 : Math.PI + 0.5; z = 26; }
+    else if (ra.moving) rig.play('run', 0.1, 1.15);
+    else rig.play('idle', 0.15);
+    rac.root.rotation.y = angleDamp(rac.root.rotation.y, faceY, 14, dt);
+    g.position.set(ra.x, y, z);
+    rig.update(dt);
+    const vx = (g.position.x - rc.lastX) / Math.max(dt, 1e-4);
+    rc.lastX = g.position.x;
+    rc.tailV += (-(rc.tailA + clamp(vx, -400, 400) * 0.0012) * 60 - rc.tailV * 9) * dt;
+    rc.tailA += rc.tailV * dt;
+    for (let i = 0; i < 5; i++) J['tail' + i].rotateZ(rc.tailA * (0.3 + i * 0.2));
+    rc.blink -= dt;
+    if (rc.blink < -0.12) rc.blink = rand(1.5, 4);
+    rac.eyes.scale.y = rc.blink < 0 ? 0.12 : 1;
+    if (ra.mode === 'rope') {
+      // hand over hand along the line
+      g.updateMatrixWorld(true);
+      const s = Math.sin(rc.ropePh) * 13;
+      pouchW.set(ra.x + 12 + s, ra.rope.h + ROPE_UP - ropeSag(ra.rope, ra.x + 12 + s) + 1, z);
+      ik2(J.uarmR, J.farmR, J.handR, pouchW, -1);
+      gripW.set(ra.x - 12 - s, ra.rope.h + ROPE_UP - ropeSag(ra.rope, ra.x - 12 - s) + 1, z);
+      ik2(J.uarmL, J.farmL, J.handL, gripW, -1);
+    }
+    return;
+  }
+
   const want = hideHeld() && state === 'play' ? 1 : 0;
   if (want && rc.mode !== 'duck') { rc.mode = 'duck'; rc.modeT = 0; rig.play('duck', 0.1, 1, true); sfx.duck(); aim = null; }
   if (!want && rc.mode === 'duck') { rc.mode = 'pop'; rc.modeT = 0; rig.play('pop', 0.08, 1, true); }
@@ -701,7 +1085,8 @@ function updateRaccoon(dt) {
 
   rc.hide += clamp(want - rc.hide, -dt / 0.2, dt / 0.16);
   const h = smooth(rc.hide);
-  g.position.set(lerp(STAND.x, HIDE_POS.x, h), lerp(STAND.y, HIDE_POS.y, h) + Math.sin(h * Math.PI) * 50, lerp(STAND.z, HIDE_POS.z, h));
+  rc.offX = Math.abs(rc.offX) < 1 ? 0 : damp(rc.offX, 0, 12, dt);
+  g.position.set(lerp(STAND.x, HIDE_POS.x, h) + rc.offX, lerp(STAND.y, HIDE_POS.y, h) + Math.sin(h * Math.PI) * 50, lerp(STAND.z, HIDE_POS.z, h));
   g.scale.setScalar(RS * lerp(1, 0.92, h));
   g.rotation.set(0, 0, 0);
   rac.root.rotation.y = angleDamp(rac.root.rotation.y, lerp(-0.45, -1.1, h), 12, dt);
@@ -748,12 +1133,12 @@ function updateRaccoon(dt) {
     pouchW.set(pouch.x, pouch.wy, LAUNCH.z);
     band.update(tipA, tipB, pouchW, pullFrac());
   }
-  hideBtn.classList.toggle('active', h > 0.5);
 }
 
 function updateAimVisuals() {
-  const show = state === 'play' && rc.hide < 0.25 && throwCool <= 0 && rc.mode !== 'hit' && rac.sling.group.visible;
-  held.visible = show;
+  const show = state === 'play' && where === 'perch' && !!held && rc.hide < 0.25 && throwCool <= 0 && rc.mode !== 'hit' && rac.sling.group.visible;
+  if (held) held.visible = show;
+  stashPile.visible = state === 'play' || state === 'paused' || state === 'menu';
   if (show) {
     held.position.set(pouch.x + 2, pouch.wy + 2, LAUNCH.z + 6);
     held.rotation.z = aim ? -0.4 : Math.sin(time * 2) * 0.1;
@@ -779,7 +1164,12 @@ function updateProjectiles(dt) {
     if (o.hitAt && o.body.speed < 0.4) o.still += dt;
     const gone = p.x < -300 || p.x > 1700 || p.y > G + 300;
     if (gone || o.age > 10 || (o.hitAt && time - o.hitAt > 3.2) || o.still > 0.8) {
-      if (!gone) burst(p.x, G - p.y, 0, 5, 0xdfe3ee, 110, 8, 0);
+      if (!gone && o.type === 'banana' && p.x > STAND_X - 90 && p.x < DOOR_X + 60) {
+        // a peel that lands by the back door waits for the stocker
+        peel.on = true; peel.x = clamp(p.x, STAND_X + 6, DOOR_X - 6);
+        peel.mesh.position.set(peel.x, DOCK_Y + 6, DOCK_Z + 20);
+        peel.mesh.visible = true;
+      } else if (!gone) burst(p.x, G - p.y, 0, 5, 0xdfe3ee, 110, 8, 0);
       removeObj(projs, o);
     }
   }
@@ -823,7 +1213,7 @@ function setText(id, text) { if (hud[id] !== text) { hud[id] = text; $(id).textC
 function setClass(id, cls) { if (hud[id + '.c'] !== cls) { hud[id + '.c'] = cls; $(id).className = cls; } }
 
 function updateHud(n) {
-  setText('lvl', 'Level ' + (levelIdx + 1) + ': ' + level.name);
+  setText('lvl', 'Day ' + day + ' · ' + clock(hourNow) + ' · ' + level.name);
   const hk = 'h' + hearts;
   if (hud.hearts !== hk) {
     hud.hearts = hk;
@@ -833,24 +1223,38 @@ function updateHud(n) {
   setText('blockers', 'Boxes blocking: ' + n);
   setText('throws', 'Throws: ' + throws + ' (par ' + level.par + ')');
   let cls = '', text = '';
-  if (state === 'play') {
+  if (state === 'play' && where === 'roam') {
+    if (inCan) { cls = 'calm'; text = 'Shh...'; }
+    else if (chased) { cls = 'danger'; text = 'Spotted! Run!'; }
+    else if (rumCan) { cls = 'calm'; text = 'Digging...'; }
+    else if (wk.state === 'warn' || wk.watching) { cls = 'warn'; text = 'They are restocking the boxes!'; }
+  } else if (state === 'play') {
     if (wk.state === 'warn') { cls = 'warn'; text = 'Back door opening!'; }
     else if (wk.watching && rc.hide < 0.6) { cls = 'danger'; text = 'Spotted! Hide!'; }
     else if (wk.watching) { cls = 'calm'; text = 'Stay hidden...'; }
     else if (wk.state === 'return' || wk.state === 'enter') { cls = 'safe'; text = 'Coast is clear'; }
-  }
+  } else if (state === 'winning' && endT >= 2.2) { cls = 'safe'; text = clock(hourNow); }
   setText('banner', text);
   setClass('banner', cls);
-  setClass('watch', wk.watching ? 'on' : '');
-  $('watchBar').style.width = Math.round(wk.alert * 100) + '%';
-  const now = ammoAt(ammoIdx), next = ammoAt(ammoIdx + 1), key = now + next;
+  const digging = where === 'roam' && rumCan;
+  setClass('watch', (where === 'perch' && wk.watching) || digging ? 'on' : '');
+  $('watchBar').style.width = Math.round((digging ? rumT / ROAM.rummage : wk.alert) * 100) + '%';
+  const now = curAmmo(), next = nextAmmo(), key = where + '|' + now + '|' + next + '|' + stash.length + '|' + sack.length;
   if (hud.ammo !== key) {
     hud.ammo = key;
-    $('ammoLine').innerHTML = 'Loaded: <b>' + AMMO[now].name + '</b>. ' + AMMO[now].hint + ' Next: <b>' + AMMO[next].name + '</b>';
+    const more = stash.length > 1 ? ' +' + (stash.length - 1) + ' in the stash' : '';
+    $('ammoLine').innerHTML = where === 'roam'
+      ? 'Sack: <b>' + sack.length + '</b> ' + (sack.length ? '(' + sack.map(t => AMMO[t].name.toLowerCase()).slice(-3).join(', ') + ')' : 'empty') + '. Haul it back to the slingshot.'
+      : now ? 'Loaded: <b>' + AMMO[now].name + '</b>. ' + AMMO[now].hint + more
+      : '<b>Out of trash!</b> ' + (TOUCH ? 'Tap RAID' : 'Run left (A)') + ' and dig through the cans.';
   }
   setText('hint', liveFish() ? 'Tap now to split the fish bones!'
+    : where === 'roam' ? (nearCan(38) && nearCan(38).loot.length && !rumCan ? 'Stand still to dig.'
+      : !(taught & 16) ? (TOUCH ? 'TRAP' : 'E') + ' rips a bag open to trip a guard. ' + (TOUCH ? 'HIDE' : 'SPACE') + ' by a can hides you.' : '')
+    : !now ? ''
     : !(taught & 1) ? 'Pull the slingshot back and let go.'
-    : !(taught & 2) ? HIDE_HOW + ' to duck into the can.' : '');
+    : !(taught & 2) ? HIDE_HOW + ' to duck into the can.'
+    : !(taught & 4) ? (TOUCH ? 'RAID' : 'A or the RAID button') + ' sends you out for more trash.' : '');
 }
 
 // ---------- camera ----------
@@ -859,29 +1263,37 @@ function resize() {
   view.resize(w, h);
   const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   cam.D = Math.max(1500 / (2 * t * camera.aspect), 800 / (2 * t));
+  cam.aspect = camera.aspect;
   placeCamera(0);
 }
 function placeCamera(dt) {
-  let tx = 0;
+  let tx = 0, tz = aim ? 1 + 0.035 * (pullFrac()) : 1, ty = 0, rate = 2.4;
   const p = projs[projs.length - 1];
-  if (!aim && p && (!p.hitAt || time - p.hitAt < 0.9) && p.age < 4) tx = clamp((p.body.position.x - 760) * 0.2, -30, 110);
-  const tz = aim ? 1 + 0.035 * (pullFrac()) : 1;
-  if (dt > 0) { cam.off = damp(cam.off, tx, 2.4, dt); cam.zoom = damp(cam.zoom, tz, 5, dt); }
+  const roaming = where === 'roam' && (state === 'play' || state === 'paused' || state === 'lost');
+  if (roaming) {
+    // on foot the camera closes in and follows him through the maze
+    tz = cam.aspect < 1 ? 0.5 : cam.aspect < 1.5 ? 0.7 : 0.84;
+    const half = 750 * tz;
+    tx = clamp(ra.x + ra.face * 70 - 672, -1700 + half - 672, 0);
+    ty = clamp(ra.h - 150, 0, 440) * 0.8;
+    rate = 5;
+  } else if (!aim && p && (!p.hitAt || time - p.hitAt < 0.9) && p.age < 4) tx = clamp((p.body.position.x - 760) * 0.2, -30, 110);
+  if (dt > 0) { cam.off = damp(cam.off, tx, rate, dt); cam.zoom = damp(cam.zoom, tz, 5, dt); cam.up = damp(cam.up, ty, 4, dt); }
   if (closeUp) {
     camera.position.set(closeUp.x - 40, closeUp.y + closeUp.D * 0.08, closeUp.D);
     camera.lookAt(closeUp.x, closeUp.y, 0);
     return;
   }
   const D = cam.D * cam.zoom, sx = rand(-1, 1) * shake, sy = rand(-1, 1) * shake;
-  camera.position.set(600 + cam.off + sx, 250 + D * 0.1 + sy, D);
-  camera.lookAt(745 + cam.off + sx * 0.5, 235 + sy * 0.5, 0);
+  camera.position.set(600 + cam.off + sx, 250 + D * 0.1 + sy + cam.up, D);
+  camera.lookAt(745 + cam.off + sx * 0.5, 235 + sy * 0.5 + cam.up, 0);
 }
 window.addEventListener('resize', resize);
 if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
 // ---------- main loop ----------
 function update(dt) {
-  if (state === 'paused') { placeCamera(dt); return; }
+  if (state === 'paused') { raidBtn.hidden = trapBtn.hidden = true; placeCamera(dt); return; }
   time += dt;
   if (state === 'play') levelTime += dt;
   throwCool = Math.max(0, throwCool - dt);
@@ -892,6 +1304,9 @@ function update(dt) {
 
   updateWorker(dt);
   updateFlying(dt);
+  if (where === 'perch' && state === 'play' && moveInput().mx < 0 && !aim) goRoam();
+  if (where === 'roam' && (state === 'play' || state === 'lost')) updateRoam(dt);
+  updateMaze(dt);
   updateRaccoon(dt);
   updateProjectiles(dt);
   syncMeshes();
@@ -907,6 +1322,7 @@ function update(dt) {
       endT = 0;
       rc.splashed = false;
       aim = null;
+      where = 'perch'; inCan = null; rc.offX = 0; endStick();
       for (const f of flying) scene.remove(f.mesh);
       flying.length = 0;
     }
@@ -950,7 +1366,7 @@ if (TEST) {
       return { minX: b.min.x, maxX: b.max.x, minY: b.min.y, maxY: b.max.y, top: b.min.y, blocking: p.x > ZONE.x0 && p.x < ZONE.x1 && p.y > ZONE.top, type: o.type };
     }),
     statics: () => STATICS,
-    ammo: () => AMMO[ammoAt(ammoIdx)],
+    ammo: () => AMMO[curAmmo()],
     constrain: constrainPouch,
     velocity: launchVelocity,
     fireDrag(dx, dy) {
@@ -958,6 +1374,12 @@ if (TEST) {
       pouch.x = c.x; pouch.wy = c.wy;
       fire();
     },
+    // the maze
+    nav, perchX: PERCH_X,
+    where: () => where, agent: () => ra, sack: () => sack, stash: () => stash, cans: () => maze.cans,
+    guards: () => guards.filter(g => g.active), inCan: () => !!inCan, trapReady: () => trapCool <= 0,
+    setMove: m => { botMove = m; }, trap: dropSlick, raid: goRoam, route: t => route(nav, ra, t),
+    hearts: () => hearts, slicks: () => slicks,
   };
   const step = sec => { for (let t = 0; t < sec - 1e-9; t += STEP) update(STEP); };
   window.TPH = {
@@ -972,12 +1394,29 @@ if (TEST) {
       boxes: boxes.length, projs: projs.length, levelTime: +levelTime.toFixed(2), hide: +rc.hide.toFixed(2), aiming: !!aim,
       pull: +(pullFrac()).toFixed(2), canAim: canAim(), mode: rc.mode, muted: isMuted(), quality: view.quality,
       overlay: overlay.classList.contains('show') ? (overlay.querySelector('h1') || {}).textContent : null,
+      where, x: +ra.x.toFixed(1), h: +ra.h.toFixed(1), move: ra.mode, floor: ra.floor ? ra.floor.id : null,
+      sack: sack.length, stash: stash.length, loaded: curAmmo(), inCan: !!inCan, slicks: slicks.length, trapCool: +trapCool.toFixed(2),
+      cans: maze.cans.map(c => c.loot.length), day, hour: +hourNow.toFixed(2), night: +world.night.toFixed(2),
+      guards: guards.filter(g => g.active).map(g => ({ x: +g.a.x.toFixed(1), h: +g.a.h.toFixed(1), state: g.state, move: g.a.mode })),
     }),
-    setAmmo: t => { ammoOverride = t; setHeld(); },
+    setAmmo: t => { ammoOverride = t; showStash(); },
+    setStash: list => { stash = list.slice(); showStash(); },
     hide: v => { hideKey = v; },
     fireDrag: (dx, dy) => api.fireDrag(dx, dy),
     forceWin() { for (const o of boxes.slice()) removeObj(boxes, o); },
     forceLose() { hearts = 1; hurtRaccoon(); },
+    // maze helpers: put the raccoon or a guard somewhere, steer without a keyboard
+    warp(x, floorId) { where = 'roam'; aim = null; inCan = null; Object.assign(ra, newAgent(nav, x, floorId)); rc.invuln = 0; },
+    move(mx, my) { botMove = mx || my ? { mx, my } : null; },
+    raid: () => goRoam(),
+    trap: () => dropSlick(),
+    guard(i, x, floorId, face = 1) {
+      const g = guards[i];
+      g.active = true; g.outer.visible = true;
+      Object.assign(g, { a: newAgent(nav, x, floorId), state: 'patrol', t: 0, lost: 0, dir: face, blind: 0, stuck: 0 });
+      g.a.face = face;
+    },
+    guardsOff() { for (const g of guards) { g.active = false; g.outer.visible = false; } },
     worldToScreen(x, y, z = LAUNCH.z) {
       const v = new THREE.Vector3(x, y, z).project(camera), r = canvas.getBoundingClientRect();
       return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
@@ -986,15 +1425,37 @@ if (TEST) {
     aim(dx, dy) { aim = { id: -1, sx: 0, sy: 0 }; const c = constrainPouch(dx, dy); pouch.x = c.x; pouch.wy = c.wy; },
     release() { const ok = aim && pullAmount() >= MIN_PULL; aim = null; if (ok) fire(); },
     closeUp(x, y, D) { closeUp = D ? { x, y, D } : null; placeCamera(0); },
-    autoplay(levelI, seedN, limit = 300) {
+    setTime(h) { hourNow = h; world.setTime(h); },
+    autoplay(levelI, seedN, limit = 480) {
       seedRandom(seedN);
+      day = 1;
       startLevel(levelI);
       const bot = makeBot(api);
-      while (state === 'play' && levelTime < limit) { bot(STEP); update(STEP); }
+      const tally = { trips: 0, caught: 0, slips: 0 };
+      let was = where, h0 = hearts, stunned = 0;
+      const trace = [];
+      let tick = 0;
+      while (state === 'play' && levelTime < limit) {
+        bot(STEP); update(STEP);
+        if (++tick % 20 === 0) {
+          trace.push(`${levelTime.toFixed(1)} ${where[0]} x${Math.round(ra.x)} h${Math.round(ra.h)} ${ra.mode[0]} in${JSON.stringify(botMove)} s${sack.length} | ` +
+            guards.filter(g => g.active).map(g => g.state.slice(0, 4) + '@' + Math.round(g.a.x) + '/' + Math.round(g.a.h) + g.a.mode[0] + (g.blind > 0 ? 'b' : '')).join(' '));
+          if (trace.length > 36) trace.shift();
+        }
+        if (where !== was) { if (where === 'roam') tally.trips++; was = where; }
+        if (hearts < h0) { if (where === 'roam') tally.caught++; h0 = hearts; }
+        const st = guards.filter(g => g.active && g.state === 'stun').length;
+        if (st > stunned) tally.slips++;
+        stunned = st;
+      }
+      // a game that never ended reports where the autoplayer was standing, to make hangs easy to diagnose
+      const stuck = state === 'play' ? { where, x: Math.round(ra.x), h: Math.round(ra.h), move: ra.mode, sack: sack.length, stash: stash.length, inCan: !!inCan,
+        hide: +rc.hide.toFixed(2), cans: maze.cans.map(c => c.loot.length).join(''), boxes: boxes.length, worker: wk.state, slicks: slicks.length,
+        guards: guards.filter(g => g.active).map(g => g.state + '@' + Math.round(g.a.x) + '/' + Math.round(g.a.h) + g.a.mode[0]).join(' '), trace } : undefined;
       let guard = 0;
-      while ((state === 'winning' || state === 'lost') && guard++ < 600) update(STEP);
-      hideKey = false;
-      return { level: levelI + 1, seed: seedN, result: state === 'won' ? 'win' : state === 'lost' ? 'lose' : 'timeout', time: +levelTime.toFixed(1), throws, hearts };
+      while ((state === 'winning' || state === 'lost') && guard++ < 900) update(STEP);
+      hideKey = false; botMove = null;
+      return { level: levelI + 1, seed: seedN, result: state === 'won' ? 'win' : state === 'lost' ? 'lose' : 'timeout', time: +levelTime.toFixed(1), throws, hearts, ...tally, stuck };
     },
   };
 }
