@@ -22,12 +22,13 @@ await page.keyboard.down('Space');
 await page.waitForFunction(() => window.TPH.info().hide > 0.9, null, { timeout: 5000 });
 await page.keyboard.up('Space');
 await page.waitForFunction(() => window.TPH.info().hide < 0.05, null, { timeout: 5000 });
-// leave the slingshot, run to the first can and dig
+// leave the slingshot, run to the first can and dig (guards sent away so the check is repeatable)
+await page.evaluate(() => window.TPH.guardsOff());
 await page.keyboard.down('KeyA');
 await page.waitForFunction(() => window.TPH.info().where === 'roam' && window.TPH.info().x < -215, null, { timeout: 15000 });
 await page.keyboard.up('KeyA');
-await page.waitForFunction(() => window.TPH.info().sack >= 1 || window.TPH.info().hearts < 3, null, { timeout: 15000 });
+await page.waitForFunction(() => window.TPH.info().sack >= 1, null, { timeout: 15000 });
 const info = await page.evaluate(() => window.TPH.info());
-console.log(JSON.stringify({ url, throws: info.throws, state: info.state, where: info.where, sack: info.sack, hour: info.hour, errors }));
+console.log(JSON.stringify({ url, throws: info.throws, state: info.state, where: info.where, sack: info.sack, hearts: info.hearts, hour: info.hour, errors }));
 await browser.close();
 process.exit(errors.length ? 1 : 0);
