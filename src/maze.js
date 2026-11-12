@@ -1,10 +1,10 @@
 // Movement rules for the alley maze: floors, ladders and clotheslines.
 // Pure logic (no three.js), shared by the raccoon, the guards, the autoplayer and the Node checks.
-import { MAZE } from './config.js';
+import { MAZES } from './config.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export function buildNav(maze = MAZE) {
+export function buildNav(maze = MAZES[0]) {
   const floors = maze.floors.map(f => ({ ...f }));
   const byId = Object.fromEntries(floors.map(f => [f.id, f]));
   const floorAt = (x, h) => floors.find(f => Math.abs(f.h - h) < 2 && x >= f.x0 - 0.01 && x <= f.x1 + 0.01) || null;

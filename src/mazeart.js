@@ -1,9 +1,9 @@
 // Meshes for the alley maze: the tenement wall, fire escapes, ladders, clotheslines and raidable trash cans.
 import * as THREE from 'three';
 import { M, RB, SP, CY, CO, ell, put, toon, glowMat } from './gfx.js';
-import { ammoMesh } from './characters.js';
+import { ammoMesh, buildWorker } from './characters.js';
 import { rand, rng } from './util.js';
-import { MAZE, ROPE_UP } from './config.js';
+import { ROPE_UP } from './config.js';
 import { ropeSag } from './maze.js';
 
 const IRON = 0x2a2838, IRON2 = 0x3d3b52;
@@ -19,7 +19,7 @@ function canvasTex(w, h, draw, repeat) {
   return t;
 }
 
-function tenementWall(scene, W) {
+function tenementWall(group, W, tint = 0xffffff) {
   const tex = canvasTex(2048, 880, (g, w, h) => {
     g.fillStyle = '#2f2a44'; g.fillRect(0, 0, w, h);
     const bw = 52, bh = 22;
@@ -34,14 +34,14 @@ function tenementWall(scene, W) {
     g.fillStyle = gr; g.fillRect(0, 0, w, h);
     for (let i = 0; i < 14; i++) { g.fillStyle = 'rgba(10,8,24,0.16)'; g.fillRect(rand(0, w), rand(0, h * 0.4), rand(3, 9), rand(90, 380)); }
   });
-  const wall = new THREE.Mesh(new THREE.BoxGeometry(1500, 800, 60), toon(0xffffff, { map: tex, rim: 0.3 }));
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(1500, 800, 60), toon(tint, { map: tex, rim: 0.3 }));
   wall.position.set(-900, 400, -100);
   wall.receiveShadow = true;
-  scene.add(wall);
-  scene.add(put(RB(1530, 26, 84, 0x3a3350, 3, 4), -900, 806, -96));
-  scene.add(put(RB(1510, 18, 30, 0x565a74, 2, 4), -900, 9, -62));
+  group.add(wall);
+  group.add(put(RB(1530, 26, 84, 0x3a3350, 3, 4), -900, 806, -96));
+  group.add(put(RB(1510, 18, 30, 0x565a74, 2, 4), -900, 9, -62));
   // drainpipe at the corner
-  scene.add(put(CY(8, 8, 800, 0x565a74, 2, 14), -168, 400, -62));
+  group.add(put(CY(8, 8, 800, 0x565a74, 2, 14), -168, 400, -62));
 
   // windows: some lit, flickering TV glow in one
   const lit = canvasTex(96, 128, (g, w, h) => {
@@ -59,10 +59,10 @@ function tenementWall(scene, W) {
   for (const y of [150, 410, 670]) for (let x = -1560; x <= -240; x += 165) {
     if (Math.abs(x + 168) < 40) continue;
     const kind = (n++ * 7 + (y > 400 ? 3 : 0)) % 5;
-    scene.add(put(RB(84, 112, 12, 0x241c34, 2.2, 3), x, y, -72));
+    group.add(put(RB(84, 112, 12, 0x241c34, 2.2, 3), x, y, -72));
     const pane = new THREE.Mesh(new THREE.PlaneGeometry(70, 98), kind === 0 || kind === 3 ? litMat : kind === 1 ? W.tvMat : dark);
-    scene.add(put(pane, x, y, -65.5));
-    scene.add(put(RB(96, 8, 20, 0x4a4160, 1.8, 2), x, y - 60, -64));
+    group.add(put(pane, x, y, -65.5));
+    group.add(put(RB(96, 8, 20, 0x4a4160, 1.8, 2), x, y - 60, -64));
   }
 }
 
@@ -167,34 +167,54 @@ function trashCan(scene, c, floor) {
   return can;
 }
 
-export function buildMaze(scene, nav) {
-  const W = { cans: [], wash: [], lamps: [] };
-  tenementWall(scene, W);
+// A resident on a balcony: ducks back inside most of the time, and either tips bonus trash
+// into the nearest can or, if the raccoon is right there on their floor, lobs something at him.
+const RESIDENT_LOOK = { SHIRT: 0xd97aa0, PANTS: 0x6a5a8c, APRON: 0xc9c2e0, CAP: 0x8a5a9c, HAIR: 0x3a2e40 };
+function buildResident(def, floor) {
+  const r = buildWorker(RESIDENT_LOOK);
+  r.outer.scale.setScalar(0.82);
+  r.outer.position.set(def.x, floor.h, -42);
+  r.outer.visible = false;
+  r.rig.play('idle', 0);
+  return Object.assign(r, { def, floor, x: def.x, state: 'idle', timer: rand(def.every[0], def.every[1]), watchT: 0 });
+}
+
+export function buildMaze(scene, nav, mazeCfg, wallTint = 0xffffff) {
+  const group = new THREE.Group();
+  const W = { cans: [], wash: [], lamps: [], residents: [], group };
+  tenementWall(group, W, wallTint);
   const tints = { A: 0xd0d6ee, B: 0xe8d6c4, C: 0xd0d6ee, D: 0xe8d6c4 };
-  for (const f of nav.floors) if (f.id !== 'g') fireEscape(scene, f, tints[f.id] || 0xffffff);
-  for (const l of nav.ladders) ladder(scene, l);
-  for (const r of nav.ropes) W.wash.push(...clothesline(scene, r));
-  for (const c of MAZE.cans) W.cans.push(trashCan(scene, c, nav.byId[c.floor]));
+  for (const f of nav.floors) if (f.id !== 'g') fireEscape(group, f, tints[f.id] || 0xffffff);
+  for (const l of nav.ladders) ladder(group, l);
+  for (const r of nav.ropes) W.wash.push(...clothesline(group, r));
+  for (const c of mazeCfg.cans) W.cans.push(trashCan(group, c, nav.byId[c.floor]));
 
   // Two warm wall lamps so the maze reads at night.
   for (const x of [-1240, -520]) {
-    scene.add(put(RB(10, 10, 46, IRON, 1.6, 2), x, 236, -52));
-    scene.add(put(CO(22, 18, IRON, 1.8, 16), x, 226, -30));
+    group.add(put(RB(10, 10, 46, IRON, 1.6, 2), x, 236, -52));
+    group.add(put(CO(22, 18, IRON, 1.8, 16), x, 226, -30));
     const bulb = new THREE.Mesh(new THREE.SphereGeometry(8, 12, 10), glowMat(0xffd9a0, 2.6));
-    scene.add(put(bulb, x, 216, -30));
+    group.add(put(bulb, x, 216, -30));
     const light = new THREE.PointLight(0xffc88a, 420, 1000, 1);
     light.position.set(x, 210, 60);
-    scene.add(light);
+    group.add(light);
     W.lamps.push({ light, bulb });
   }
 
   // props: a few flower boxes and an AC unit give the floors some life
   for (const [x, h] of [[-1400, 260], [-640, 260], [-1000, 520], [-460, 520]]) {
-    scene.add(put(RB(70, 16, 20, 0x7a4b34, 1.8, 3), x, h + 104, -62));
-    for (let i = -1; i <= 1; i++) scene.add(put(ell(11, 1, 0.9, 1, i ? 0x4f9a5c : 0xe86a8c, 1.5), x + i * 20, h + 118, -62));
+    group.add(put(RB(70, 16, 20, 0x7a4b34, 1.8, 3), x, h + 104, -62));
+    for (let i = -1; i <= 1; i++) group.add(put(ell(11, 1, 0.9, 1, i ? 0x4f9a5c : 0xe86a8c, 1.5), x + i * 20, h + 118, -62));
   }
-  scene.add(put(RB(90, 60, 44, 0x8f96ac, 2.2, 6), -1420, 430, -50));
+  group.add(put(RB(90, 60, 44, 0x8f96ac, 2.2, 6), -1420, 430, -50));
 
+  for (const def of mazeCfg.residents || []) {
+    const r = buildResident(def, nav.byId[def.floor]);
+    group.add(r.outer);
+    W.residents.push(r);
+  }
+
+  scene.add(group);
   W.update = (dt, t) => {
     for (const p of W.wash) p.rotation.z = Math.sin(t * 1.7 + p.userData.ph) * 0.12;
     for (const c of W.cans) c.update(dt, t);

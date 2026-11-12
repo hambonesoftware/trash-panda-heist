@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { M, RB, SP, CY, CA, CO, ell, put, toon, glowMat, rimU, RoundedBoxGeometry } from './gfx.js';
 import { rand, rng, lerp } from './util.js';
-import { G, ZONE, DUMP_X, DOOR_X, DOCK_Y, CAN_X, CS } from './config.js';
+import { G, ZONE, DUMP_X, DOOR_X, DOCK_Y, CAN_X, CS, THEMES } from './config.js';
 
 function canvas(w, h, draw) {
   const c = document.createElement('canvas');
@@ -349,20 +349,32 @@ export function buildWorld(scene, view) {
     scene.add(p);
   }
 
-  // Neon store sign.
+  // Neon store sign. Each complex gets its own name and glow color (see world.setComplex).
   scene.add(put(RB(340, 96, 12, 0x1a1626, 3, 6), 1030, 505, -334));
-  const neon = tex(canvas(1024, 256, (g, w, h) => {
-    g.font = '900 112px "Luckiest Guy", "Arial Black", sans-serif';
-    g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
-    g.shadowColor = '#ff3d6e'; g.shadowBlur = 30;
-    g.strokeStyle = '#ff4f7a'; g.lineWidth = 16; g.strokeText('MEGA-MART', w / 2, h / 2 + 6);
-    g.shadowBlur = 0; g.strokeStyle = '#ffe3ea'; g.lineWidth = 5; g.strokeText('MEGA-MART', w / 2, h / 2 + 6);
-  }));
-  W.neonMat = new THREE.MeshBasicMaterial({ map: neon, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false, color: new THREE.Color(2.2, 2.2, 2.2) });
+  const neonTex = (text, hex) => {
+    const color = '#' + hex.toString(16).padStart(6, '0');
+    const size = Math.max(42, Math.min(112, 820 / text.length));
+    return tex(canvas(1024, 256, (g, w, h) => {
+      g.font = `900 ${size}px "Luckiest Guy", "Arial Black", sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+      g.shadowColor = color; g.shadowBlur = size * 0.27;
+      g.strokeStyle = color; g.lineWidth = size * 0.143; g.strokeText(text, w / 2, h / 2 + 6);
+      g.shadowBlur = 0; g.strokeStyle = '#ffe3ea'; g.lineWidth = size * 0.045; g.strokeText(text, w / 2, h / 2 + 6);
+    }));
+  };
+  W.neonTexs = THEMES.map(th => neonTex(th.sign, th.neon));
+  W.neonMat = new THREE.MeshBasicMaterial({ map: W.neonTexs[0], transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false, color: new THREE.Color(2.2, 2.2, 2.2) });
   scene.add(put(new THREE.Mesh(new THREE.PlaneGeometry(320, 80), W.neonMat), 1030, 506, -326));
   W.neonLight = new THREE.PointLight(0xff4f7a, 260, 520, 1);
   W.neonLight.position.set(1030, 470, -250);
   scene.add(W.neonLight);
+  W.setComplex = i => {
+    const th = THEMES[i];
+    W.neonMat.map = W.neonTexs[i];
+    W.neonMat.map.needsUpdate = true;
+    W.neonLight.color.setHex(th.neon);
+    wall.material.color.setHex(th.wall);
+  };
 
   // Loading dock and roll-up door.
   scene.add(put(RB(1180, DOCK_Y, 200, 0x8a8fa8, 3, 4), 1230, DOCK_Y / 2, -232));

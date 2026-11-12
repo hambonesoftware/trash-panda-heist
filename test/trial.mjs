@@ -49,7 +49,12 @@ async function until(page, fn, arg, ms = 8000, what = 'condition') {
   try { await page.waitForFunction(fn, arg, { timeout: ms, polling: 50 }); }
   catch (e) { throw new Error(`timed out waiting for ${what}; state ${JSON.stringify(await info(page))}`); }
 }
-const ready = page => until(page, () => window.TPH.info().canAim, null, 8000, 'slingshot ready');
+// The raccoon now starts every level with an empty stash (he has to raid a can first), so tests
+// that only care about slingshot mechanics arm it directly instead of raiding for real.
+async function ready(page) {
+  await page.evaluate(() => { if (!window.TPH.info().stash) window.TPH.setStash(['can', 'can', 'can']); });
+  return until(page, () => window.TPH.info().canAim, null, 8000, 'slingshot ready');
+}
 async function center(page, sel) {
   const b = await page.locator(sel).boundingBox();
   assert(b, sel + ' not visible');

@@ -50,9 +50,9 @@ function roam(api, now, mem) {
   const target = mem.goal ? { x: mem.goal.x, floor: mem.goal.floor } : home;
   const want = steer(target);
 
-  // the closest guard on this level that is awake
+  // the closest guard (or alert balcony resident) on this level that is awake
   let threat = null, td = 250;
-  for (const g of api.guards()) {
+  for (const g of [...api.guards(), ...api.residents()]) {
     if (g.state === 'stun' || g.state === 'gloat') continue;
     const dx = Math.abs(g.a.x - a.x), dh = Math.abs(g.a.h - a.h);
     if (dh < 100 && dx < td) { td = dx; threat = g; }

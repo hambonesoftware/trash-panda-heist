@@ -9,7 +9,7 @@ import { initAudio, sfx, toggleMute, isMuted } from './audio.js';
 import { rand, lerp, clamp, damp, smooth, angleDamp, seedRandom } from './util.js';
 import {
   G, STEP, STEP_MS, GRAV, AIR, RS, CAN_X, RAC_X, ZONE, DUMP_TOP, DOOR_X, DOCK_Y, DOCK_Z, STAND_X,
-  MAX_PULL, MIN_PULL, POWER, SPEC, AMMO, LEVELS, MAZE, ROAM, PERCH_X, ROPE_UP,
+  MAX_PULL, MIN_PULL, POWER, SPEC, AMMO, LEVELS, MAZES, THEMES, ROAM, PERCH_X, ROPE_UP,
 } from './config.js';
 import { makeBot } from './bot.js';
 
@@ -24,8 +24,16 @@ const raidBtn = $('raidBtn'), trapBtn = $('trapBtn'), stickEl = $('stick'), knob
 const view = createView(canvas);
 const { scene, camera } = view;
 const world = buildWorld(scene, view);
-const nav = buildNav();
-const maze = buildMaze(scene, nav);
+// Every complex (one per meal) gets its own fire escape, cans, guards and balcony residents,
+// all built up front so switching levels is an instant swap with no rebuild hitch. Only the
+// active complex's group stays in the scene graph -- the rest are detached (not just hidden)
+// so three.js never has to walk three buildings' worth of idle geometry every frame.
+const navs = MAZES.map(m => buildNav(m));
+const mazeArts = navs.map((nv, i) => buildMaze(scene, nv, MAZES[i], THEMES[i].wall));
+mazeArts.forEach((m, i) => { m.group.visible = true; if (i !== 0) scene.remove(m.group); });
+let activeMazeIdx = 0;
+let nav = navs[0];
+let maze = mazeArts[0];
 
 // ---------- characters ----------
 const rac = buildRaccoon();
@@ -57,13 +65,15 @@ const RAC_MOVE = { run: ROAM.run, climb: ROAM.climb, rope: ROAM.rope, grav: ROAM
 const sackM = sackMesh();
 rac.sackAnchor.add(sackM);
 const GUARD_LOOK = { SHIRT: 0x3d4f9c, APRON: 0x23283d, CAP: 0x1c2140 };
-const guards = MAZE.guards.map((def, i) => {
-  const g = Object.assign(buildWorker(GUARD_LOOK), { def, i, a: newAgent(nav, def.x, def.floor), state: 'patrol', t: 0, dur: 0, dir: i % 2 ? -1 : 1, last: null, lost: 0, active: false, faceY: 0 });
+const guardSets = MAZES.map((m, mi) => m.guards.map((def, i) => {
+  const g = Object.assign(buildWorker(GUARD_LOOK), { def, i, a: newAgent(navs[mi], def.x, def.floor), state: 'patrol', t: 0, dur: 0, dir: i % 2 ? -1 : 1, last: null, lost: 0, active: false, faceY: 0 });
   g.outer.scale.setScalar(0.86);
   g.outer.visible = false;
-  scene.add(g.outer);
+  if (mi === 0) scene.add(g.outer);
   return g;
-});
+}));
+let guards = guardSets[0];
+let residents = mazeArts[0].residents;
 const slicks = [];
 const stashPile = new THREE.Group();
 stashPile.position.set(232, 0, 44);
@@ -252,9 +262,32 @@ function clearLevel() {
   for (const d of trail) d.visible = false;
 }
 
+// Switches which complex (fire escape, cans, guards, residents) is live. Safe to call repeatedly
+// with the same index: it just re-arms the residents' sporadic timers.
+function activateMaze(i) {
+  if (activeMazeIdx !== i) {
+    scene.remove(mazeArts[activeMazeIdx].group);
+    scene.add(mazeArts[i].group);
+    for (const g of guards) { g.active = false; g.outer.visible = false; scene.remove(g.outer); }
+    for (const g of guardSets[i]) scene.add(g.outer);
+    activeMazeIdx = i;
+  }
+  nav = navs[i];
+  maze = mazeArts[i];
+  guards = guardSets[i];
+  residents = maze.residents;
+  world.setComplex(i);
+  for (const r of residents) {
+    Object.assign(r, { state: 'idle', timer: rand(r.def.every[0], r.def.every[1]), watchT: 0 });
+    r.outer.visible = false;
+    r.rig.play('idle', 0);
+  }
+}
+
 function loadLevel(i) {
   levelIdx = i;
   level = LEVELS[i];
+  activateMaze(i);
   clearLevel();
   for (const [x, ...types] of level.cols) {
     let y = x >= 915 ? DUMP_TOP : G;
@@ -262,7 +295,7 @@ function loadLevel(i) {
   }
   hearts = 3; throws = 0; ammoIdx = 0; ammoOverride = null; throwCool = 0; clearT = 0; endT = 0; levelTime = 0; aim = null;
   dayK = 1 + 0.12 * (day - 1);
-  where = 'perch'; stash = level.stash.slice(); sack = []; inCan = null; rumCan = null; rumT = 0; trapCool = 0; chased = false; botMove = null;
+  where = 'perch'; stash = []; sack = []; inCan = null; rumCan = null; rumT = 0; trapCool = 0; chased = false; botMove = null;
   hourNow = level.hour; world.setTime(hourNow);
   Object.assign(ra, newAgent(nav, RAC_X, 'g'));
   for (const s of slicks) scene.remove(s.mesh);
@@ -558,10 +591,10 @@ function attachBox(anchor, type) {
 function setCarry(type) { attachBox(wk.carry, type); wk.carrying = !!type; }
 function setGrab(type) { attachBox(wk.grab, type); wk.grabType = type; }
 
-function fly(type, from, to, dur, arc, kind) {
+function fly(type, from, to, dur, arc, kind, extra) {
   const mesh = boxMesh(type).g;
   scene.add(mesh);
-  flying.push({ mesh, type, from, to, dur, arc, kind, t: 0 });
+  flying.push({ mesh, type, from, to, dur, arc, kind, t: 0, extra });
 }
 
 function landPlaced(f) {
@@ -599,6 +632,27 @@ function landAttack() {
   }
 }
 
+// A resident on a balcony catching the raccoon on their floor: same consequence as a guard catch.
+function residentHit() {
+  if (sack.length) { burst(ra.x, ra.h + 70, 24, 12, 0xb89a62, 300, 10); sack = []; }
+  hurtRaccoon();
+}
+
+function residentLand(f) {
+  if (state !== 'play') return;
+  const e = f.extra;
+  if (f.kind === 'residentHit') {
+    const stillThere = where === 'roam' && !inCan && rc.invuln <= 0 && ra.floor && ra.floor.id === e.floorId && Math.abs(ra.x - e.x) < 90;
+    if (stillThere) residentHit();
+    else burst(e.x, e.h + 70, 10, 6, 0xd49d5e, 200, 9);
+  } else {
+    e.can.loot.push(e.lootType);
+    e.can.show();
+    burst(e.can.x, e.can.floor.h + 92, 0, 5, 0xdfe3ee, 150, 6);
+    sfx.thud(5);
+  }
+}
+
 function updateFlying(dt) {
   for (let i = flying.length - 1; i >= 0; i--) {
     const f = flying[i];
@@ -610,6 +664,7 @@ function updateFlying(dt) {
       scene.remove(f.mesh);
       flying.splice(i, 1);
       if (f.kind === 'attack') landAttack();
+      else if (f.kind === 'residentHit' || f.kind === 'residentDump') residentLand(f);
       else if (state === 'play') landPlaced(f);
     }
   }
@@ -617,6 +672,48 @@ function updateFlying(dt) {
 
 const FACE_LEFT = Math.PI + 0.35, FACE_RIGHT = -0.35, FACE_OUT = -Math.PI / 2, FACE_IN = Math.PI / 2;
 const _v = new THREE.Vector3();
+
+// ---------- balcony residents ----------
+function residentThrow(r) {
+  const floor = r.floor, tx = where === 'roam' && ra.floor === floor ? ra.x : r.x;
+  fly('small', { x: r.x, y: floor.h + 90, z: -30 }, { x: tx, y: floor.h + 20, z: 24 }, 0.4, 40, 'residentHit', { x: r.x, h: floor.h, floorId: floor.id });
+}
+function residentDump(r) {
+  const floor = r.floor;
+  const can = maze.cans.filter(c => c.floor === floor).sort((a, b) => Math.abs(a.x - r.x) - Math.abs(b.x - r.x))[0];
+  if (!can) return;
+  const lootType = can.full[Math.floor(rand(0, can.full.length))] || 'can';
+  fly('small', { x: r.x, y: floor.h + 90, z: -30 }, { x: can.x, y: floor.h + 20, z: -14 }, 0.5, 30, 'residentDump', { can, lootType });
+}
+function updateResidents(dt) {
+  if (state !== 'play') return;
+  for (const r of residents) {
+    if (r.state === 'idle') {
+      r.timer -= dt;
+      if (r.timer <= 0) { r.state = 'peek'; r.timer = 0.5; r.outer.visible = true; r.rig.play('idle', 0.1); sfx.door(); }
+    } else if (r.state === 'peek') {
+      r.timer -= dt;
+      if (r.timer <= 0) {
+        const spotted = where === 'roam' && !inCan && rc.invuln <= 0 && ra.floor && ra.floor.id === r.def.floor && Math.abs(ra.x - r.x) < 180;
+        if (spotted) { r.state = 'watch'; r.timer = r.def.watch || 0.5; r.rig.play('spot', 0.1); sfx.spotted(); }
+        else { r.state = 'dump'; r.timer = 0.55; r.rig.play('lob', 0.1, 1, true); }
+      }
+    } else if (r.state === 'watch') {
+      r.timer -= dt;
+      if (r.timer <= 0) { r.state = 'throw'; r.timer = 0.36; r.rig.play('throw', 0.08, 1, true); }
+    } else if (r.state === 'throw') {
+      r.timer -= dt;
+      if (r.timer <= 0) { residentThrow(r); r.state = 'retreat'; r.timer = 0.6; }
+    } else if (r.state === 'dump') {
+      r.timer -= dt;
+      if (r.timer <= 0) { residentDump(r); r.state = 'retreat'; r.timer = 0.6; }
+    } else if (r.state === 'retreat') {
+      r.timer -= dt;
+      if (r.timer <= 0) { r.state = 'idle'; r.outer.visible = false; r.timer = rand(r.def.every[0], r.def.every[1]); }
+    }
+    if (r.outer.visible) r.rig.update(dt);
+  }
+}
 
 // ---------- on foot in the maze ----------
 function moveInput() {
@@ -1277,6 +1374,10 @@ function placeCamera(dt) {
     tx = clamp(ra.x + ra.face * 70 - 672, -1700 + half - 672, 0);
     ty = clamp(ra.h - 150, 0, 440) * 0.8;
     rate = 5;
+  } else if (state === 'winning' && endT >= 5.3) {
+    // he keeps running after the meal; let the camera chase him out instead of holding still
+    tx = clamp(rac.outer.position.x - 745, 0, 900);
+    rate = 3.2;
   } else if (!aim && p && (!p.hitAt || time - p.hitAt < 0.9) && p.age < 4) tx = clamp((p.body.position.x - 760) * 0.2, -30, 110);
   if (dt > 0) { cam.off = damp(cam.off, tx, rate, dt); cam.zoom = damp(cam.zoom, tz, 5, dt); cam.up = damp(cam.up, ty, 4, dt); }
   if (closeUp) {
@@ -1303,6 +1404,7 @@ function update(dt) {
   afterStep();
 
   updateWorker(dt);
+  updateResidents(dt);
   updateFlying(dt);
   if (where === 'perch' && state === 'play' && moveInput().mx < 0 && !aim) goRoam();
   if (where === 'roam' && (state === 'play' || state === 'lost')) updateRoam(dt);
@@ -1375,9 +1477,12 @@ if (TEST) {
       fire();
     },
     // the maze
-    nav, perchX: PERCH_X,
+    get nav() { return nav; }, perchX: PERCH_X,
     where: () => where, agent: () => ra, sack: () => sack, stash: () => stash, cans: () => maze.cans,
-    guards: () => guards.filter(g => g.active), inCan: () => !!inCan, trapReady: () => trapCool <= 0,
+    guards: () => guards.filter(g => g.active),
+    residents: () => residents.filter(r => r.state === 'peek' || r.state === 'watch' || r.state === 'throw')
+      .map(r => ({ a: { x: r.x, h: r.floor.h, face: 0 }, state: 'chase' })),
+    inCan: () => !!inCan, trapReady: () => trapCool <= 0,
     setMove: m => { botMove = m; }, trap: dropSlick, raid: goRoam, route: t => route(nav, ra, t),
     hearts: () => hearts, slicks: () => slicks,
   };
