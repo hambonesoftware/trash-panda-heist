@@ -108,7 +108,7 @@ export const MAZES = [
     ],
     guards: [
       { floor: 'g', x: -700, x0: -1480, x1: -120 },
-      { floor: 'B', x: -500, x0: -740,  x1: -320 },
+      { floor: 'B', x: -500, x0: -740,  x1: -120 },
     ],
     residents: [
       { floor: 'A', x: -1350, every: [16, 28], watch: 2.8 },

@@ -49,10 +49,14 @@ async function until(page, fn, arg, ms = 8000, what = 'condition') {
   try { await page.waitForFunction(fn, arg, { timeout: ms, polling: 50 }); }
   catch (e) { throw new Error(`timed out waiting for ${what}; state ${JSON.stringify(await info(page))}`); }
 }
-// The raccoon now starts every level with an empty stash (he has to raid a can first), so tests
-// that only care about slingshot mechanics arm it directly instead of raiding for real.
+// The raccoon now starts every level out in the alley with an empty sack, not at the slingshot,
+// so tests that only care about slingshot mechanics warp him home and arm the stash directly
+// instead of raiding and running back for real.
 async function ready(page) {
-  await page.evaluate(() => { if (!window.TPH.info().stash) window.TPH.setStash(['can', 'can', 'can']); });
+  await page.evaluate(() => {
+    if (window.TPH.info().where !== 'perch') window.TPH.toPerch();
+    if (!window.TPH.info().stash) window.TPH.setStash(['can', 'can', 'can']);
+  });
   return until(page, () => window.TPH.info().canAim, null, 8000, 'slingshot ready');
 }
 async function center(page, sel) {
@@ -248,7 +252,7 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
   });
   await check('rule: hiding in the can blocks the worker', async () => {
     const r = await page.evaluate(() => {
-      const T = window.TPH; T.run(false); T.seed(7); T.start(0); T.hide(true);
+      const T = window.TPH; T.run(false); T.seed(7); T.start(0); T.toPerch(); T.hide(true);
       T.step(40); const out = T.info(); T.hide(false); T.run(true); return out;
     });
     assert(r.hearts === 3, 'took damage while hidden: ' + JSON.stringify(r));
@@ -318,7 +322,7 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
     assert(await page.isVisible('#trapBtn'), 'TRAP button not on screen');
   });
   await check('rule: an empty stash cannot fire, and the HUD says to raid', async () => {
-    await page.evaluate(() => { window.TPH.start(0); window.TPH.setStash([]); });
+    await page.evaluate(() => { window.TPH.start(0); window.TPH.toPerch(); window.TPH.setStash([]); });
     await page.waitForTimeout(400);
     const p = await page.evaluate(() => window.TPH.pouchScreen());
     await mouseDrag(page, p, -130, 60);
@@ -379,7 +383,7 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
   });
   await check('rule: a banana peel by the back door trips the stocker', async () => {
     const r = await page.evaluate(() => {
-      const T = window.TPH; T.run(false); T.seed(7); T.start(0); T.setAmmo('banana'); T.hide(false);
+      const T = window.TPH; T.run(false); T.seed(7); T.start(0); T.toPerch(); T.setAmmo('banana'); T.hide(false);
       let fired = false, slipped = false, boxes = 0;
       for (let t = 0; t < 40 && !slipped; t += 1 / 60) {
         const i = T.info();

@@ -103,6 +103,9 @@ let time = 0, levelTime = 0, hearts = 3, throws = 0, ammoIdx = 0, ammoOverride =
 let throwCool = 0, clearT = 0, endT = 0, shake = 0, frames = 0, running = true;
 let hideKey = false, hideBtnDown = false, aim = null, spottedLatch = false, taught = 0, lastStretch = 0;
 let where = 'perch', day = 1, dayK = 1, hourNow = 0, stash = [], sack = [], inCan = null, rumCan = null, rumT = 0, trapCool = 0, botMove = null, chased = false;
+// a beat of catch immunity right after a level loads, since the far-left spawn sits close to a
+// patrol's turnaround point; unlike rc.invuln (hit flinch) this never blinks the raccoon out of view.
+let spawnGrace = 0;
 const keys = { l: false, r: false, u: false, d: false };
 const stick = { id: null, ox: 0, oy: 0, mx: 0, my: 0 };
 const boxes = [], projs = [], flying = [], parts = [], killQueue = [];
@@ -295,9 +298,11 @@ function loadLevel(i) {
   }
   hearts = 3; throws = 0; ammoIdx = 0; ammoOverride = null; throwCool = 0; clearT = 0; endT = 0; levelTime = 0; aim = null;
   dayK = 1 + 0.12 * (day - 1);
-  where = 'perch'; stash = []; sack = []; inCan = null; rumCan = null; rumT = 0; trapCool = 0; chased = false; botMove = null;
+  // he starts each meal empty-sacked at the far end of the alley, not idle at the dumpster, so
+  // the first thing to do is run the maze for trash before the slingshot is even an option.
+  where = 'roam'; stash = []; sack = []; inCan = null; rumCan = null; rumT = 0; trapCool = 0; chased = false; botMove = null;
   hourNow = level.hour; world.setTime(hourNow);
-  Object.assign(ra, newAgent(nav, RAC_X, 'g'));
+  Object.assign(ra, newAgent(nav, ROAM.xMin + 40, 'g'));
   for (const s of slicks) scene.remove(s.mesh);
   slicks.length = 0;
   peel.on = false; peel.mesh.visible = false;
@@ -309,13 +314,14 @@ function loadLevel(i) {
     g.rig.play('walk', 0);
   });
   showStash();
+  spawnGrace = ROAM.stun;
   Object.assign(rc, { mode: 'stand', modeT: 0, hide: 0, invuln: 0, aimW: 0, splashed: false, offX: 0 });
   Object.assign(pouch, { x: REST.x, wy: REST.wy, vx: 0, vy: 0 });
   rac.outer.visible = true;
-  rac.outer.position.copy(STAND);
+  rac.outer.position.set(ra.x, ra.h, 24);
   rac.outer.rotation.set(0, 0, 0);
   rac.outer.scale.setScalar(RS);
-  rac.root.rotation.set(0, -0.45, 0);
+  rac.root.rotation.set(0, -0.3, 0);
   rac.rig.play('idle', 0.1);
   Object.assign(wk, { state: 'idle', timer: level.first, alert: 0, cool: 0, door: 0, react: null, carrying: false, watching: false });
   setCarry(null); setGrab(null);
@@ -642,7 +648,7 @@ function residentLand(f) {
   if (state !== 'play') return;
   const e = f.extra;
   if (f.kind === 'residentHit') {
-    const stillThere = where === 'roam' && !inCan && rc.invuln <= 0 && ra.floor && ra.floor.id === e.floorId && Math.abs(ra.x - e.x) < 90;
+    const stillThere = where === 'roam' && !inCan && rc.invuln <= 0 && spawnGrace <= 0 && ra.floor && ra.floor.id === e.floorId && Math.abs(ra.x - e.x) < 90;
     if (stillThere) residentHit();
     else burst(e.x, e.h + 70, 10, 6, 0xd49d5e, 200, 9);
   } else {
@@ -694,7 +700,7 @@ function updateResidents(dt) {
     } else if (r.state === 'peek') {
       r.timer -= dt;
       if (r.timer <= 0) {
-        const spotted = where === 'roam' && !inCan && rc.invuln <= 0 && ra.floor && ra.floor.id === r.def.floor && Math.abs(ra.x - r.x) < 180;
+        const spotted = where === 'roam' && !inCan && rc.invuln <= 0 && spawnGrace <= 0 && ra.floor && ra.floor.id === r.def.floor && Math.abs(ra.x - r.x) < 180;
         if (spotted) { r.state = 'watch'; r.timer = r.def.watch || 0.5; r.rig.play('spot', 0.1); sfx.spotted(); }
         else { r.state = 'dump'; r.timer = 0.55; r.rig.play('lob', 0.1, 1, true); }
       }
@@ -890,7 +896,7 @@ function updateGuards(dt) {
           clip = null;
         }
       }
-      if (g.state === 'chase' && where === 'roam' && !inCan && rc.invuln <= 0 && Math.abs(ra.x - a.x) < 38 && Math.abs(ra.h - a.h) < 80) { caught(g); clip = null; }
+      if (g.state === 'chase' && where === 'roam' && !inCan && rc.invuln <= 0 && spawnGrace <= 0 && Math.abs(ra.x - a.x) < 38 && Math.abs(ra.h - a.h) < 80) { caught(g); clip = null; }
     }
     if (clip) g.rig.play(clip, 0.18, clipSpeed);
     if (state !== 'paused') g.rig.update(dt);
@@ -1061,6 +1067,7 @@ const tipA = new THREE.Vector3(), tipB = new THREE.Vector3(), gripW = new THREE.
 function updateRaccoon(dt) {
   const g = rac.outer, rig = rac.rig, J = rac.J;
   rc.invuln = Math.max(0, rc.invuln - dt);
+  spawnGrace = Math.max(0, spawnGrace - dt);
   rc.modeT += dt;
   world.canLid.rotation.z = damp(world.canLid.rotation.z, 0, 8, dt);
 
@@ -1511,9 +1518,12 @@ if (TEST) {
     forceWin() { for (const o of boxes.slice()) removeObj(boxes, o); },
     forceLose() { hearts = 1; hurtRaccoon(); },
     // maze helpers: put the raccoon or a guard somewhere, steer without a keyboard
-    warp(x, floorId) { where = 'roam'; aim = null; inCan = null; Object.assign(ra, newAgent(nav, x, floorId)); rc.invuln = 0; },
+    warp(x, floorId) { where = 'roam'; aim = null; inCan = null; Object.assign(ra, newAgent(nav, x, floorId)); rc.invuln = 0; spawnGrace = 0; },
     move(mx, my) { botMove = mx || my ? { mx, my } : null; },
     raid: () => goRoam(),
+    // also snaps the camera home instantly: it only drifts back over real time otherwise, which
+    // left pouchScreen() answering for a frame the camera hadn't caught up to yet.
+    toPerch() { Object.assign(ra, newAgent(nav, RAC_X, 'g')); enterPerch(); cam.off = 0; cam.zoom = 1; cam.up = 0; placeCamera(0); },
     trap: () => dropSlick(),
     guard(i, x, floorId, face = 1) {
       const g = guards[i];
