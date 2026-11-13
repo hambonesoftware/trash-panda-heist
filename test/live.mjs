@@ -1,4 +1,4 @@
-// Smoke test against the published site: loads, starts, throws with a real mouse drag, hides,
+// Smoke test against the published site: loads, starts, throws with a real mouse drag from the slingshot, hides,
 // then runs out to a trash can and digs. No errors allowed.
 import { launchBrowser } from './browser.mjs';
 
@@ -11,7 +11,10 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(url + (url.includes('?') ? '&' : '?') + 'test&q=1');
 await page.waitForFunction(() => window.TPH && window.TPH.ready, null, { timeout: 90000 });
 await page.click('button[data-act=play]');
-await page.waitForFunction(() => window.TPH.info().canAim, null, { timeout: 15000 });
+// each meal starts out in the alley with an empty sack, so put him at the slingshot with some trash to throw
+await page.waitForFunction(() => window.TPH.info().state === 'play', null, { timeout: 15000 });
+await page.evaluate(() => { window.TPH.toPerch(); if (!window.TPH.info().stash) window.TPH.setStash(['can', 'can', 'can']); });
+await page.waitForFunction(() => window.TPH.info().canAim, null, { timeout: 30000 });
 const p = await page.evaluate(() => window.TPH.pouchScreen());
 await page.mouse.move(p.x, p.y);
 await page.mouse.down();
