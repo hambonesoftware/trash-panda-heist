@@ -87,7 +87,11 @@ export const MAZES = [
       { floor: 'B', x: -480,  x0: -740,  x1: -320 },
       { floor: 'C', x: -1100, x0: -1300, x1: -880 },
     ],
-    residents: [],
+    residents: [
+      { floor: 'A', x: -1300, every: [14, 24] },
+      { floor: 'B', x: -900, every: [18, 30] },
+      { floor: 'D', x: -250, every: [16, 28] },
+    ],
   },
   { // Breakfast: Sunrise Bakery. A tall direct ladder straight to the roof instead of a two-stage climb.
     floors: FLOORS, ropes: ROPES,
@@ -111,7 +115,9 @@ export const MAZES = [
       { floor: 'B', x: -500, x0: -740,  x1: -120 },
     ],
     residents: [
-      { floor: 'A', x: -1350, every: [16, 28], watch: 2.8 },
+      { floor: 'A', x: -1350, every: [14, 24] },
+      { floor: 'B', x: -850, every: [18, 30] },
+      { floor: 'D', x: -200, every: [16, 28] },
     ],
   },
   { // Lunch: Green Park Market. Floor D gets its own tall ladder, so B hangs off the far rope instead.
@@ -136,10 +142,12 @@ export const MAZES = [
       { floor: 'D', x: -300, x0: -540,  x1: -200 },
     ],
     residents: [
-      { floor: 'B', x: -550, every: [16, 28], watch: 2.8 },
+      { floor: 'A', x: -1300, every: [14, 24] },
+      { floor: 'B', x: -800, every: [18, 30] },
+      { floor: 'D', x: -150, every: [16, 28] },
     ],
   },
-  { // Dinner: Uncle Ray's BBQ. Full two-stage climbs both sides, busiest crew of the night.
+  { // Dinner: Bayou Bar & Grill, a small-town roadhouse. Full two-stage climbs both sides, busiest crew of the night.
     floors: FLOORS, ropes: ROPES,
     ladders: [
       { x: -1420, h0: 0,   h1: 260 },
@@ -162,7 +170,10 @@ export const MAZES = [
       { floor: 'C', x: -1150, x0: -1300, x1: -880 },
     ],
     residents: [
-      { floor: 'D', x: -350, every: [16, 28], watch: 2.8 },
+      { floor: 'A', x: -1330, every: [14, 24] },
+      { floor: 'B', x: -870, every: [18, 30] },
+      { floor: 'C', x: -1300, every: [16, 28] },
+      { floor: 'D', x: -230, every: [20, 32] },
     ],
   },
 ];
@@ -173,7 +184,7 @@ export const THEMES = [
   { sign: 'MEGA-MART',        neon: 0xff4f7a, wall: 0xffffff },
   { sign: 'SUNRISE BAKERY',   neon: 0xffd23f, wall: 0xffe0c2 },
   { sign: 'GREEN PARK MARKET',neon: 0x4df08f, wall: 0xdcf0d8 },
-  { sign: "UNCLE RAY'S BBQ",  neon: 0xff3f3f, wall: 0xffd2b0 },
+  { sign: 'BAYOU BAR & GRILL', neon: 0xff6a3a, wall: 0xffd2b0 },
 ];
 
 // One meal every six hours. After dinner a new day starts with a faster crew.

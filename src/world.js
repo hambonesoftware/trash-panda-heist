@@ -261,7 +261,6 @@ export function buildWorld(scene, view) {
   wall.position.set(1150, 280, -350);
   wall.receiveShadow = true;
   scene.add(wall);
-  scene.add(put(RB(1630, 22, 64, 0x4c2f46, 3, 4), 1150, 565, -345));
   scene.add(put(RB(1610, 16, 30, 0x5f6076, 2, 4), 1150, 8, -322));
 
   const plank = tex(canvas(1024, 256, (g, w, h) => {
@@ -349,6 +348,145 @@ export function buildWorld(scene, view) {
     scene.add(p);
   }
 
+  // ---------- the store out back: a different shop (wall, trim and dressing) for each meal ----------
+  const stuccoTex = tex(canvas(2048, 720, (g, w, h) => {
+    g.fillStyle = '#e6cfa6'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 5200; i++) { const v = rand(-1, 1); g.fillStyle = v > 0 ? `rgba(255,248,230,${v * 0.18})` : `rgba(120,80,40,${-v * 0.14})`; g.fillRect(rand(0, w), rand(0, h), rand(2, 7), rand(2, 5)); }
+    g.fillStyle = '#b5653f'; g.fillRect(0, h - 150, w, 150);
+    for (let x = 0; x < w; x += 64) for (let y = h - 150; y < h; y += 50) { g.fillStyle = `hsl(18, 46%, ${rand(40, 48)}%)`; g.fillRect(x + 3, y + 3, 58, 44); }
+    g.fillStyle = '#f4e8cc'; g.fillRect(0, h - 158, w, 10);
+    const gr = g.createLinearGradient(0, 0, 0, h * 0.3);
+    gr.addColorStop(0, 'rgba(60,30,20,0.35)'); gr.addColorStop(1, 'rgba(60,30,20,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, w, h * 0.3);
+  }));
+  const sidingTex = tex(canvas(2048, 720, (g, w, h) => {
+    for (let y = 0; y < h; y += 28) {
+      g.fillStyle = `hsl(${rand(138, 150)}, ${rand(26, 34)}%, ${rand(34, 42)}%)`; g.fillRect(0, y, w, 26);
+      g.fillStyle = 'rgba(230,255,235,0.14)'; g.fillRect(0, y, w, 3);
+      g.fillStyle = 'rgba(8,24,14,0.4)'; g.fillRect(0, y + 25, w, 3);
+    }
+    for (let i = 0; i < 30; i++) { g.fillStyle = 'rgba(8,24,14,0.1)'; g.fillRect(rand(0, w), rand(0, h * 0.5), rand(3, 9), rand(90, 300)); }
+    const gr = g.createLinearGradient(0, h * 0.6, 0, h);
+    gr.addColorStop(0, 'rgba(10,20,14,0)'); gr.addColorStop(1, 'rgba(10,20,14,0.5)');
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  }));
+  // a small-town roadhouse: board-and-batten siding with a painted trim stripe
+  const smokehouseTex = tex(canvas(2048, 720, (g, w, h) => {
+    g.fillStyle = '#3a2618'; g.fillRect(0, 0, w, h);
+    for (let x = 0; x < w; x += 48) {
+      g.fillStyle = `hsl(${rand(22, 30)}, ${rand(30, 40)}%, ${rand(32, 40)}%)`; g.fillRect(x, 0, 48, h);
+      g.fillStyle = 'rgba(0,0,0,0.22)'; for (let k = 0; k < 4; k++) g.fillRect(x + rand(4, 40), 0, 1.5, h);
+      g.fillStyle = `hsl(26, 34%, ${rand(24, 28)}%)`; g.fillRect(x + 42, 0, 9, h);           // batten
+      g.fillStyle = 'rgba(255,230,200,0.12)'; g.fillRect(x + 42, 0, 2, h);
+    }
+    g.fillStyle = '#2f5a3a'; g.fillRect(0, 64, w, 22);
+    g.fillStyle = 'rgba(255,255,255,0.14)'; g.fillRect(0, 64, w, 4);
+    const gr = g.createLinearGradient(0, h * 0.55, 0, h);
+    gr.addColorStop(0, 'rgba(8,4,4,0)'); gr.addColorStop(1, 'rgba(8,4,4,0.55)');
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  }));
+  // glowing sign faces: a lit box sign and neon window signs
+  const glowText = (lines, w, h, ink, bg) => tex(canvas(w, h, (g) => {
+    if (bg) { g.fillStyle = bg; g.fillRect(0, 0, w, h); }
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    lines.forEach(([text, size, col], i) => {
+      const y = h * (i + 0.5) / lines.length;
+      g.font = `900 ${size}px "Luckiest Guy", "Arial Black", sans-serif`;
+      g.shadowColor = col; g.shadowBlur = bg ? 0 : size * 0.3;
+      if (bg) { g.fillStyle = col; g.fillText(text, w / 2, y); }
+      else { g.strokeStyle = col; g.lineWidth = size * 0.14; g.strokeText(text, w / 2, y); g.shadowBlur = 0; g.strokeStyle = '#fff3e0'; g.lineWidth = size * 0.045; g.strokeText(text, w / 2, y); }
+    });
+    if (ink) { g.strokeStyle = ink; g.lineWidth = 14; g.strokeRect(7, 7, w - 14, h - 14); }
+  }));
+  const signMat = (t, k = 1.6) => new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(k, k, k), toneMapped: false, transparent: true, depthWrite: false });
+  const awning = (x, y, z, wide, cols) => {
+    const g = new THREE.Group(), n = Math.round(wide / 26);
+    for (let i = 0; i < n; i++) g.add(put(RB(26, 6, 66, cols[i % cols.length], 1.6, 2), (i - (n - 1) / 2) * 26, 0, 0));
+    for (let i = 0; i < n; i++) g.add(put(RB(26, 14, 4, cols[i % cols.length], 1.4, 1.5), (i - (n - 1) / 2) * 26, -12, 33));
+    g.rotation.x = 0.38;
+    g.position.set(x, y, z);
+    return g;
+  };
+  const crate = (x, y, z, fill) => {
+    const g = new THREE.Group();
+    g.add(put(RB(62, 30, 44, 0x9b7444, 1.8, 3), 0, 0, 0));
+    for (let i = 0; i < 6; i++) g.add(put(SP(10, fill[i % fill.length], 1.6), -22 + (i % 3) * 22, 20, i < 3 ? -8 : 10));
+    g.position.set(x, y, z);
+    return g;
+  };
+  const STORE_LOOKS = [
+    { map: wall.material.map, cornice: 0x4c2f46 },
+    { map: stuccoTex, cornice: 0xb5653f },
+    { map: sidingTex, cornice: 0x1f6b3e },
+    { map: smokehouseTex, cornice: 0x2f5a3a },
+  ];
+  W.stores = STORE_LOOKS.map((look, i) => {
+    const g = new THREE.Group();
+    g.add(put(RB(1630, 22, 64, look.cornice, 3, 4), 1150, 565, -345));
+    if (i === 1) { // Sunrise Bakery: striped awning, bread crates, flower boxes, a hanging pretzel
+      g.add(awning(DOOR_X, 300, -298, 182, [0xf2c14e, 0xfff6e0]));
+      g.add(crate(1490, DOCK_Y + 17, -290, [0xd9a45a, 0xc58a3e]));
+      g.add(crate(1250, DOCK_Y + 17, -296, [0xe8b96a, 0xd9a45a, 0xf3d9a0]));
+      for (const x of [520, 760, 1540]) {
+        g.add(put(RB(92, 16, 22, 0x7a4b34, 1.8, 3), x, 436, -316));
+        for (let k = -1; k <= 1; k++) g.add(put(ell(11, 1, 0.9, 1, k ? 0xf08aa8 : 0xfff0a0, 1.5), x + k * 28, 452, -316));
+      }
+      g.add(put(RB(46, 5, 5, 0x2a2430, 1, 1.5), 1215, 384, -316));
+      g.add(put(M(new THREE.TorusGeometry(15, 4, 8, 22), 0xc47a3a, 2), 1232, 358, -316));
+    } else if (i === 2) { // Green Park Market: long green awning, produce stand, chalkboard
+      g.add(awning(1330, 300, -298, 338, [0x2f9a5c, 0xc4d6c0]));
+      for (const [x, fill] of [[1500, [0xe23b2e, 0xc92e24]], [1572, [0xff9a2a, 0xf0841a]], [1644, [0x6fc04a, 0x4f9a3a]]]) g.add(crate(x, DOCK_Y + 17, -292, fill));
+      g.add(put(RB(92, 118, 8, 0x2a3a33, 2, 3), 880, 150, -318));
+      for (let k = 0; k < 5; k++) g.add(put(RB(k === 0 ? 56 : 62 - k * 6, 4, 2, 0xf4f1e8, 0.6, 1), 880, 190 - k * 20, -313));
+      for (const x of [520, 760, 1540]) g.add(awning(x, 560, -306, 104, [0x2f9a5c, 0xc4d6c0]).translateY(-140));
+    } else if (i === 3) { // Bayou Bar & Grill: roadhouse with a pole sign, neon in the windows, a tin porch roof
+      // tall roadside pole sign with a lit box face and a chaser-bulb arrow
+      g.add(put(CY(9, 11, 560, 0x5a5f72, 2, 14), 1760, 280, -250));
+      g.add(put(RB(250, 140, 22, 0x2a1e18, 2.4, 6), 1760, 600, -250));
+      g.add(put(new THREE.Mesh(new THREE.PlaneGeometry(230, 120), signMat(glowText([['BAR', 64, '#c2302a'], ['& GRILL', 48, '#2a4a30']], 512, 268, '#c2302a', '#e8d2a4'), 0.78)), 1760, 600, -238));
+      const chase = glowMat(0xffd27a, 2.6);
+      for (let k = 0; k < 9; k++) g.add(put(new THREE.Mesh(new THREE.SphereGeometry(5, 8, 6), chase), 1640 + k * 20, 510 - Math.abs(k - 4) * 6, -244));
+      // neon in the windows
+      g.add(put(new THREE.Mesh(new THREE.PlaneGeometry(80, 40), signMat(glowText([['OPEN', 84, '#ff3f6a']], 256, 128))), 520, 512, -320));
+      g.add(put(new THREE.Mesh(new THREE.PlaneGeometry(112, 78), signMat(glowText([['COLD', 66, '#4fd6ff'], ['BEER', 66, '#ffd23f']], 256, 180), 0.85)), 1580, 262, -324));
+      // corrugated tin porch roof on posts over the back door, with a bare porch bulb
+      const tin = new THREE.Group();
+      for (let k = 0; k < 9; k++) tin.add(put(RB(22, 5, 80, k % 2 ? 0x9aa1ac : 0x868d98, 1.4, 1.5), (k - 4) * 21, 0, 0));
+      tin.rotation.x = 0.3; tin.position.set(DOOR_X, 312, -294);
+      g.add(tin);
+      for (const dx of [-88, 88]) g.add(put(RB(9, 262, 9, 0x6a4a30, 1.6, 2), DOOR_X + dx, DOCK_Y + 131, -258));
+      g.add(put(new THREE.Mesh(new THREE.SphereGeometry(7, 10, 8), glowMat(0xfff0c0, 3)), DOOR_X - 70, 290, -312));
+      // the kitchen smoker, beer kegs and a crate of empties
+      const smoker = CY(44, 44, 170, 0x2a2733, 2.2, 28);
+      smoker.rotation.z = Math.PI / 2;
+      g.add(put(smoker, 1610, DOCK_Y + 62, -286));
+      for (const dx of [-60, 0, 60]) g.add(put(CY(46, 46, 6, 0x6a6f8a, 1.6, 28), 1610 + dx, DOCK_Y + 62, -286).rotateZ(Math.PI / 2));
+      g.add(put(CY(11, 11, 280, 0x2a2733, 2, 16), 1666, DOCK_Y + 190, -286));
+      g.add(put(CY(16, 11, 22, 0x2a2733, 2, 16), 1666, DOCK_Y + 340, -286));
+      for (const [x, z] of [[1250, -250], [1300, -262]]) {
+        g.add(put(CY(24, 24, 58, 0xb8bec8, 2, 18), x, DOCK_Y + 29, z));
+        for (const dy of [-20, 20]) g.add(put(CY(25.5, 25.5, 4, 0x8a909c, 1.4, 18), x, DOCK_Y + 29 + dy, z));
+      }
+      g.add(put(RB(56, 26, 38, 0xc9a24a, 1.8, 3), 1490, DOCK_Y + 13, -262));
+      for (let k = 0; k < 6; k++) g.add(put(CY(4, 4, 22, 0x3d6a3a, 1.2, 8), 1472 + (k % 3) * 18, DOCK_Y + 34, -270 + Math.floor(k / 3) * 16));
+      const bulbMat = glowMat(0xffd27a, 2.4);
+      for (let k = 0; k <= 11; k++) {
+        const t = k / 11, x = 890 + t * 620, y = 420 - 56 * t * (1 - t) * 4;
+        g.add(put(new THREE.Mesh(new THREE.SphereGeometry(6, 10, 8), bulbMat), x, y, -310));
+      }
+    }
+    return g;
+  });
+  W.stores.forEach((g, i) => { g.visible = i === 0; scene.add(g); });
+  W.smoke = [];
+  for (let i = 0; i < 5; i++) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: softDot, transparent: true, opacity: 0, depthWrite: false, color: 0xc9ccd8, fog: true }));
+    m.userData.t = i / 5;
+    m.visible = false;
+    scene.add(m);
+    W.smoke.push(m);
+  }
+
   // Neon store sign. Each complex gets its own name and glow color (see world.setComplex).
   scene.add(put(RB(340, 96, 12, 0x1a1626, 3, 6), 1030, 505, -334));
   const neonTex = (text, hex) => {
@@ -373,7 +511,10 @@ export function buildWorld(scene, view) {
     W.neonMat.map = W.neonTexs[i];
     W.neonMat.map.needsUpdate = true;
     W.neonLight.color.setHex(th.neon);
-    wall.material.color.setHex(th.wall);
+    wall.material.map = STORE_LOOKS[i].map;
+    wall.material.needsUpdate = true;
+    W.stores.forEach((g, j) => { g.visible = j === i; });
+    for (const m of W.smoke) m.visible = i === 3;
   };
 
   // Loading dock and roll-up door.
@@ -591,6 +732,14 @@ export function buildWorld(scene, view) {
       s.position.set(640 + Math.sin(k * 6 + s.id) * 14 + k * 30, 8 + k * 200, 60);
       s.scale.setScalar(30 + k * 90);
       s.material.opacity = Math.sin(k * Math.PI) * 0.22;
+    }
+    for (const s of W.smoke) {
+      if (!s.visible) continue;
+      s.userData.t = (s.userData.t + dt * 0.22) % 1;
+      const k = s.userData.t;
+      s.position.set(1666 + Math.sin(k * 5 + s.id) * 12 + k * 40, DOCK_Y + 360 + k * 220, -270);
+      s.scale.setScalar(36 + k * 90);
+      s.material.opacity = Math.sin(k * Math.PI) * 0.3;
     }
     for (const s of W.stink) {
       s.userData.t = (s.userData.t + dt * 0.35) % 1;

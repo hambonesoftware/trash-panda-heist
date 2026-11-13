@@ -24,12 +24,12 @@ const raidBtn = $('raidBtn'), trapBtn = $('trapBtn'), stickEl = $('stick'), knob
 const view = createView(canvas);
 const { scene, camera } = view;
 const world = buildWorld(scene, view);
-// Every complex (one per meal) gets its own fire escape, cans, guards and balcony residents,
+// Every complex (one per meal) gets its own apartment block, fire escape, cans, guards and window neighbours,
 // all built up front so switching levels is an instant swap with no rebuild hitch. Only the
 // active complex's group stays in the scene graph -- the rest are detached (not just hidden)
 // so three.js never has to walk three buildings' worth of idle geometry every frame.
 const navs = MAZES.map(m => buildNav(m));
-const mazeArts = navs.map((nv, i) => buildMaze(scene, nv, MAZES[i], THEMES[i].wall));
+const mazeArts = navs.map((nv, i) => buildMaze(scene, nv, MAZES[i], i));
 mazeArts.forEach((m, i) => { m.group.visible = true; if (i !== 0) scene.remove(m.group); });
 let activeMazeIdx = 0;
 let nav = navs[0];
@@ -194,15 +194,15 @@ function removeObj(list, o) {
 
 const partGeo = new THREE.BoxGeometry(1, 1, 1);
 const partMats = new Map();
-function burst(x, y, z, n, color, speed, size, grav = 900) {
+function burst(x, y, z, n, color, speed, size, grav = 900, rnd = rand) {
   let mat = partMats.get(color);
   if (!mat) { mat = new THREE.MeshToonMaterial({ color }); partMats.set(color, mat); }
   for (let i = 0; i < n; i++) {
     const m = new THREE.Mesh(partGeo, mat);
-    const a = rand(0, Math.PI * 2), sp = rand(0.3, 1) * speed;
-    m.position.set(x + rand(-10, 10), y + rand(-10, 10), z + rand(-10, 10));
+    const a = rnd(0, Math.PI * 2), sp = rnd(0.3, 1) * speed;
+    m.position.set(x + rnd(-10, 10), y + rnd(-10, 10), z + rnd(-10, 10));
     scene.add(m);
-    parts.push({ m, vx: Math.cos(a) * sp, vy: Math.abs(Math.sin(a)) * sp + speed * 0.3, vz: rand(-0.5, 0.5) * speed, life: rand(0.5, 0.9), size: rand(0.6, 1.2) * size, grav, spin: rand(-9, 9) });
+    parts.push({ m, vx: Math.cos(a) * sp, vy: Math.abs(Math.sin(a)) * sp + speed * 0.3, vz: rnd(-0.5, 0.5) * speed, life: rnd(0.5, 0.9), size: rnd(0.6, 1.2) * size, grav, spin: rnd(-9, 9) });
   }
 }
 
@@ -281,9 +281,9 @@ function activateMaze(i) {
   residents = maze.residents;
   world.setComplex(i);
   for (const r of residents) {
-    Object.assign(r, { state: 'idle', timer: rand(r.def.every[0], r.def.every[1]), watchT: 0 });
-    r.outer.visible = false;
-    r.rig.play('idle', 0);
+    Object.assign(r, { state: 'idle', timer: resRand(r.def.every[0], r.def.every[1]), can: null, loot: null });
+    r.hold(null);
+    r.setOut(false);
   }
 }
 
@@ -598,7 +598,7 @@ function setCarry(type) { attachBox(wk.carry, type); wk.carrying = !!type; }
 function setGrab(type) { attachBox(wk.grab, type); wk.grabType = type; }
 
 function fly(type, from, to, dur, arc, kind, extra) {
-  const mesh = boxMesh(type).g;
+  const mesh = (extra && extra.mesh) || boxMesh(type).g;
   scene.add(mesh);
   flying.push({ mesh, type, from, to, dur, arc, kind, t: 0, extra });
 }
@@ -638,25 +638,14 @@ function landAttack() {
   }
 }
 
-// A resident on a balcony catching the raccoon on their floor: same consequence as a guard catch.
-function residentHit() {
-  if (sack.length) { burst(ra.x, ra.h + 70, 24, 12, 0xb89a62, 300, 10); sack = []; }
-  hurtRaccoon();
-}
-
+// A resident's trash landing in a can: the can gets one more piece of loot.
 function residentLand(f) {
   if (state !== 'play') return;
   const e = f.extra;
-  if (f.kind === 'residentHit') {
-    const stillThere = where === 'roam' && !inCan && rc.invuln <= 0 && spawnGrace <= 0 && ra.floor && ra.floor.id === e.floorId && Math.abs(ra.x - e.x) < 90;
-    if (stillThere) residentHit();
-    else burst(e.x, e.h + 70, 10, 6, 0xd49d5e, 200, 9);
-  } else {
-    e.can.loot.push(e.lootType);
-    e.can.show();
-    burst(e.can.x, e.can.floor.h + 92, 0, 5, 0xdfe3ee, 150, 6);
-    sfx.thud(5);
-  }
+  e.can.loot.push(e.lootType);
+  e.can.show();
+  burst(e.can.x, e.can.floor.h + 92, 0, 5, 0xdfe3ee, 150, 6, 900, resRand);
+  sfx.thud(5);
 }
 
 function updateFlying(dt) {
@@ -670,7 +659,7 @@ function updateFlying(dt) {
       scene.remove(f.mesh);
       flying.splice(i, 1);
       if (f.kind === 'attack') landAttack();
-      else if (f.kind === 'residentHit' || f.kind === 'residentDump') residentLand(f);
+      else if (f.kind === 'residentDump') residentLand(f);
       else if (state === 'play') landPlaced(f);
     }
   }
@@ -679,45 +668,61 @@ function updateFlying(dt) {
 const FACE_LEFT = Math.PI + 0.35, FACE_RIGHT = -0.35, FACE_OUT = -Math.PI / 2, FACE_IN = Math.PI / 2;
 const _v = new THREE.Vector3();
 
+// The neighbours use a random stream of their own, so how often they pop out never changes what the guards,
+// the stocker or the seeded trial games do.
+let resSeed = 20251112;
+const resRand = (a, b) => { resSeed = (Math.imul(resSeed, 1664525) + 1013904223) >>> 0; return a + (resSeed / 4294967296) * (b - a); };
 // ---------- balcony residents ----------
-function residentThrow(r) {
-  const floor = r.floor, tx = where === 'roam' && ra.floor === floor ? ra.x : r.x;
-  fly('small', { x: r.x, y: floor.h + 90, z: -30 }, { x: tx, y: floor.h + 20, z: 24 }, 0.4, 40, 'residentHit', { x: r.x, h: floor.h, floorId: floor.id });
-}
-function residentDump(r) {
-  const floor = r.floor;
-  const can = maze.cans.filter(c => c.floor === floor).sort((a, b) => Math.abs(a.x - r.x) - Math.abs(b.x - r.x))[0];
-  if (!can) return;
-  const lootType = can.full[Math.floor(rand(0, can.full.length))] || 'can';
-  fly('small', { x: r.x, y: floor.h + 90, z: -30 }, { x: can.x, y: floor.h + 20, z: -14 }, 0.5, 30, 'residentDump', { can, lootType });
+// Neighbours pop their heads out of their windows every so often and drop a bit of trash into the nearest
+// can on their floor. They are friendly: nothing they do can hurt the raccoon.
+const RES = { rise: 0.4, look: 0.55, wind: 0.3, toss: 0.16, linger: 0.8, sink: 0.35 };
+const RES_NEXT = { rise: 'look', look: 'wind', wind: 'toss', toss: 'linger', linger: 'sink' };
+// Neighbours drop their trash down into the cans out in the alley, never the ones up on the fire escapes: those
+// stay the hard-to-reach stash. Prefer an empty can, and skip one the raccoon is rummaging in right now.
+function residentCan(r) {
+  const busy = c => where === 'roam' && ra.floor === c.floor && Math.abs(ra.x - c.x) < 170;
+  const cans = maze.cans.filter(c => c.floor.h === 0 && !busy(c));
+  const d = c => Math.abs(c.x - r.x) + (c.loot.length ? 400 : 0);
+  return cans.sort((a, b) => d(a) - d(b))[0];
 }
 function updateResidents(dt) {
   if (state !== 'play') return;
   for (const r of residents) {
     if (r.state === 'idle') {
       r.timer -= dt;
-      if (r.timer <= 0) { r.state = 'peek'; r.timer = 0.5; r.outer.visible = true; r.rig.play('idle', 0.1); sfx.door(); }
-    } else if (r.state === 'peek') {
-      r.timer -= dt;
-      if (r.timer <= 0) {
-        const spotted = where === 'roam' && !inCan && rc.invuln <= 0 && spawnGrace <= 0 && ra.floor && ra.floor.id === r.def.floor && Math.abs(ra.x - r.x) < 180;
-        if (spotted) { r.state = 'watch'; r.timer = r.def.watch || 0.5; r.rig.play('spot', 0.1); sfx.spotted(); }
-        else { r.state = 'dump'; r.timer = 0.55; r.rig.play('lob', 0.1, 1, true); }
-      }
-    } else if (r.state === 'watch') {
-      r.timer -= dt;
-      if (r.timer <= 0) { r.state = 'throw'; r.timer = 0.36; r.rig.play('throw', 0.08, 1, true); }
-    } else if (r.state === 'throw') {
-      r.timer -= dt;
-      if (r.timer <= 0) { residentThrow(r); r.state = 'retreat'; r.timer = 0.6; }
-    } else if (r.state === 'dump') {
-      r.timer -= dt;
-      if (r.timer <= 0) { residentDump(r); r.state = 'retreat'; r.timer = 0.6; }
-    } else if (r.state === 'retreat') {
-      r.timer -= dt;
-      if (r.timer <= 0) { r.state = 'idle'; r.outer.visible = false; r.timer = rand(r.def.every[0], r.def.every[1]); }
+      if (r.timer > 0) continue;
+      const can = residentCan(r);
+      if (!can) { r.timer = resRand(2, 4); continue; }
+      r.can = can;
+      r.loot = can.full[Math.floor(resRand(0, can.full.length))] || 'can';
+      r.hold(ammoMesh(r.loot));
+      r.arm.rotation.x = -1.15; r.head.rotation.y = 0;
+      r.setOut(true); r.pop(0);
+      r.state = 'rise'; r.timer = RES.rise; sfx.door();
+      continue;
     }
-    if (r.outer.visible) r.rig.update(dt);
+    r.timer -= dt;
+    const k = 1 - Math.max(0, r.timer) / RES[r.state];
+    const side = Math.sign(r.can.x - r.x) || 1;
+    if (r.state === 'rise') { r.pop(k); r.head.rotation.y = 0.2 * Math.sin(k * 7); }
+    else if (r.state === 'look') r.head.rotation.y = lerp(0, 0.55 * side, Math.min(1, k * 2.5));
+    else if (r.state === 'wind') r.arm.rotation.x = lerp(-1.15, 0.7, k);
+    else if (r.state === 'toss') r.arm.rotation.x = lerp(0.7, -1.9, k);
+    else if (r.state === 'linger') {
+      r.arm.rotation.x = lerp(-1.9, -1.15, Math.min(1, k * 3));
+      // glance at the raccoon if he is on their floor, otherwise watch the can
+      const near = where === 'roam' && ra.floor === r.floor;
+      r.head.rotation.y = near ? Math.max(-0.6, Math.min(0.6, (ra.x - r.x) / 260)) : 0.55 * side;
+    } else if (r.state === 'sink') { r.pop(Math.max(0.001, 1 - k)); r.head.rotation.y *= 0.9; }
+    if (r.timer > 0) continue;
+    if (r.state === 'toss') {
+      const type = r.loot, mesh = r.bag;
+      r.hold(null);
+      fly('small', { x: r.x + 26, y: r.winY - 8, z: -50 }, { x: r.can.x, y: r.can.floor.h + 90, z: -14 }, 0.5 + (r.winY - 90) / 1500, 30, 'residentDump', { can: r.can, lootType: type, mesh: ammoMesh(type) });
+    }
+    const next = RES_NEXT[r.state];
+    if (next) { r.state = next; r.timer = RES[next]; }
+    else { r.state = 'idle'; r.setOut(false); r.timer = resRand(r.def.every[0], r.def.every[1]); }
   }
 }
 
@@ -1469,7 +1474,7 @@ if (TEST) {
     setHide: v => { hideKey = v; },
     canAim,
     hideAmount: () => rc.hide,
-    busy: () => projs.some(o => !o.hitAt && o.age < 5) || boxes.some(o => o.body.speed > 1.2) || flying.length > 0,
+    busy: () => projs.some(o => !o.hitAt && o.age < 5) || boxes.some(o => o.body.speed > 1.2) || flying.some(f => f.kind !== 'residentDump'),
     boxes: () => boxes.filter(o => !o.dead).map(o => {
       const b = o.body.bounds, p = o.body.position;
       return { minX: b.min.x, maxX: b.max.x, minY: b.min.y, maxY: b.max.y, top: b.min.y, blocking: p.x > ZONE.x0 && p.x < ZONE.x1 && p.y > ZONE.top, type: o.type };
@@ -1487,8 +1492,7 @@ if (TEST) {
     get nav() { return nav; }, perchX: PERCH_X,
     where: () => where, agent: () => ra, sack: () => sack, stash: () => stash, cans: () => maze.cans,
     guards: () => guards.filter(g => g.active),
-    residents: () => residents.filter(r => r.state === 'peek' || r.state === 'watch' || r.state === 'throw')
-      .map(r => ({ a: { x: r.x, h: r.floor.h, face: 0 }, state: 'chase' })),
+    residents: () => residents.map(r => ({ floor: r.floor.id, x: r.x, state: r.state })),
     inCan: () => !!inCan, trapReady: () => trapCool <= 0,
     setMove: m => { botMove = m; }, trap: dropSlick, raid: goRoam, route: t => route(nav, ra, t),
     hearts: () => hearts, slicks: () => slicks,
@@ -1531,7 +1535,11 @@ if (TEST) {
       Object.assign(g, { a: newAgent(nav, x, floorId), state: 'patrol', t: 0, lost: 0, dir: face, blind: 0, stuck: 0 });
       g.a.face = face;
     },
-    guardsOff() { for (const g of guards) { g.active = false; g.outer.visible = false; } },
+    // also keeps the window neighbours indoors, so a test can count what is in the cans
+    guardsOff() {
+      for (const g of guards) { g.active = false; g.outer.visible = false; }
+      for (const r of residents) { Object.assign(r, { state: 'idle', timer: 1e9 }); r.hold(null); r.setOut(false); }
+    },
     worldToScreen(x, y, z = LAUNCH.z) {
       const v = new THREE.Vector3(x, y, z).project(camera), r = canvas.getBoundingClientRect();
       return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
@@ -1541,8 +1549,10 @@ if (TEST) {
     release() { const ok = aim && pullAmount() >= MIN_PULL; aim = null; if (ok) fire(); },
     closeUp(x, y, D) { closeUp = D ? { x, y, D } : null; placeCamera(0); },
     setTime(h) { hourNow = h; world.setTime(h); },
+    popResidents() { for (const r of residents) if (r.state === 'idle') r.timer = 0; },
     autoplay(levelI, seedN, limit = 480) {
       seedRandom(seedN);
+      resSeed = (seedN * 2654435761) >>> 0;   // the neighbours' own stream too, so a seed always replays the same game
       day = 1;
       startLevel(levelI);
       const bot = makeBot(api);

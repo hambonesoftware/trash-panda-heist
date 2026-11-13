@@ -45,8 +45,11 @@ async function openPage(contextOpts, label) {
   return { context, page };
 }
 const info = page => page.evaluate(() => window.TPH.info());
+// The browser here renders in software, so the game can run at a quarter of real time; every wait gets SLOW
+// times its nominal budget so a slow machine is not mistaken for a broken rule.
+const SLOW = +(process.env.TRIAL_SLOW || 3);
 async function until(page, fn, arg, ms = 8000, what = 'condition') {
-  try { await page.waitForFunction(fn, arg, { timeout: ms, polling: 50 }); }
+  try { await page.waitForFunction(fn, arg, { timeout: ms * SLOW, polling: 50 }); }
   catch (e) { throw new Error(`timed out waiting for ${what}; state ${JSON.stringify(await info(page))}`); }
 }
 // The raccoon now starts every level out in the alley with an empty sack, not at the slingshot,
@@ -222,23 +225,23 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
   });
   await check('win screen: Next level button', async () => {
     await page.evaluate(() => window.TPH.forceWin());
-    await page.waitForSelector('button[data-act=next]', { timeout: 25000 });
+    await page.waitForSelector('button[data-act=next]', { timeout: 60000 });
     await page.click('button[data-act=next]');
     await until(page, () => window.TPH.info().level === 1 && window.TPH.info().state === 'play', null, 3000, 'level 2');
   });
   await check('win screen: Replay button and Enter key', async () => {
     await page.evaluate(() => window.TPH.forceWin());
-    await page.waitForSelector('button[data-act=retry]', { timeout: 25000 });
+    await page.waitForSelector('button[data-act=retry]', { timeout: 60000 });
     await page.click('button[data-act=retry]');
     await until(page, () => window.TPH.info().level === 1 && window.TPH.info().state === 'play', null, 3000, 'replay');
     await page.evaluate(() => window.TPH.forceWin());
-    await page.waitForSelector('button[data-act=next]', { timeout: 25000 });
+    await page.waitForSelector('button[data-act=next]', { timeout: 60000 });
     await page.keyboard.press('Enter');
     await until(page, () => window.TPH.info().level === 2 && window.TPH.info().state === 'play', null, 3000, 'Enter advanced');
   });
   await check('lose screen: Try again button', async () => {
     await page.evaluate(() => window.TPH.forceLose());
-    await page.waitForSelector('button[data-act=retry]', { timeout: 25000 });
+    await page.waitForSelector('button[data-act=retry]', { timeout: 60000 });
     await page.click('button[data-act=retry]');
     await until(page, () => { const i = window.TPH.info(); return i.state === 'play' && i.hearts === 3; }, null, 3000, 'retry');
   });
@@ -405,7 +408,7 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
     assert(a.hour === 0 && a.night === 1 && a.day === 1, 'level 1 is not midnight: ' + JSON.stringify([a.hour, a.night, a.day]));
     await page.evaluate(() => window.TPH.forceWin());
     await until(page, () => window.TPH.info().state === 'winning' && window.TPH.info().hour > 2, null, 20000, 'clock running during the meal');
-    await page.waitForSelector('button[data-act=next]', { timeout: 25000 });
+    await page.waitForSelector('button[data-act=next]', { timeout: 60000 });
     assert((await page.textContent('#overlay')).includes('6:00 AM'), 'win card does not show the new time');
     await page.click('button[data-act=next]');
     await until(page, () => window.TPH.info().level === 1 && window.TPH.info().state === 'play', null, 3000, 'breakfast');
@@ -415,7 +418,7 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
   });
   await check('after dinner a new day starts at midnight', async () => {
     await page.evaluate(() => { window.TPH.start(3); window.TPH.forceWin(); });
-    await page.waitForSelector('button[data-act=next]', { timeout: 25000 });
+    await page.waitForSelector('button[data-act=next]', { timeout: 60000 });
     await page.click('button[data-act=next]');
     await until(page, () => { const i = window.TPH.info(); return i.level === 0 && i.day === 2 && i.hour === 0 && i.state === 'play'; }, null, 3000, 'day 2');
   });
@@ -600,12 +603,12 @@ for (const ph of PHONES) {
   });
   await check('touch: win and lose screen buttons respond to taps', async () => {
     await page.evaluate(() => window.TPH.forceWin());
-    await page.waitForSelector('button[data-act=next]', { timeout: 25000 });
+    await page.waitForSelector('button[data-act=next]', { timeout: 60000 });
     let c = await center(page, 'button[data-act=next]');
     await page.touchscreen.tap(c.x, c.y);
     await until(page, () => window.TPH.info().level === 1 && window.TPH.info().state === 'play', null, 3000, 'next level');
     await page.evaluate(() => window.TPH.forceLose());
-    await page.waitForSelector('button[data-act=retry]', { timeout: 25000 });
+    await page.waitForSelector('button[data-act=retry]', { timeout: 60000 });
     c = await center(page, 'button[data-act=retry]');
     await page.touchscreen.tap(c.x, c.y);
     await until(page, () => window.TPH.info().state === 'play' && window.TPH.info().hearts === 3, null, 3000, 'retry');
