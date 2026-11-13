@@ -12,6 +12,7 @@ import {
   MAX_PULL, MIN_PULL, POWER, SPEC, AMMO, LEVELS, MAZES, THEMES, ROAM, PERCH_X, ROPE_UP,
 } from './config.js';
 import { makeBot } from './bot.js';
+import { artReady, loadArt } from './art.js';
 
 const { Engine, Bodies, Body, Events, Composite, Query } = window.Matter;
 const $ = id => document.getElementById(id);
@@ -23,6 +24,7 @@ const canvas = $('game'), wrap = $('wrap'), hideBtn = $('hideBtn'), overlay = $(
 const raidBtn = $('raidBtn'), trapBtn = $('trapBtn'), stickEl = $('stick'), knobEl = $('knob');
 const view = createView(canvas);
 const { scene, camera } = view;
+await loadArt();
 const world = buildWorld(scene, view);
 // Every complex (one per meal) gets its own apartment block, fire escape, cans, guards and window neighbours,
 // all built up front so switching levels is an instant swap with no rebuild hitch. Only the
@@ -188,6 +190,11 @@ function spawnProj(type, x, y, vx, vy, z = 0, split = false) {
 function removeObj(list, o) {
   Composite.remove(engine.world, o.body);
   scene.remove(o.mesh);
+  if (o.worn && o.skin && !o.skin.isMesh) {
+    o.skin.traverse(mesh => {
+      if (mesh.userData.ownsMaterial) mesh.material.dispose();
+    });
+  }
   const i = list.indexOf(o);
   if (i >= 0) list.splice(i, 1);
 }
@@ -220,7 +227,14 @@ function hit(self, other, rel, vOther) {
     if (p && p.kind === 'proj') { const k = AMMO[p.type].pierce || 0.55; p.punch = { x: vOther.x * k, y: vOther.y * k }; }
   } else if (!o.worn && o.hp < o.max * 0.55) {
     o.worn = true;
-    o.skin.material = toon(SPEC[o.type].hurt);
+    if (o.skin.isMesh) o.skin.material = toon(SPEC[o.type].hurt);
+    else o.skin.traverse(mesh => {
+      if (mesh.isMesh) {
+        mesh.material = mesh.material.clone();
+        mesh.material.color.multiplyScalar(.65);
+        mesh.userData.ownsMaterial = true;
+      }
+    });
   }
 }
 
@@ -1500,6 +1514,8 @@ if (TEST) {
   const step = sec => { for (let t = 0; t < sec - 1e-9; t += STEP) update(STEP); };
   window.TPH = {
     ready: true,
+    artReady,
+    renderStats: () => ({ ...view.renderer.info.render, ...view.renderer.info.memory }),
     get frames() { return frames; },
     run(v) { running = v; last = performance.now(); lag = 0; },
     step,

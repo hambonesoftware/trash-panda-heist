@@ -4,7 +4,7 @@ import path from 'node:path';
 import { serve, ROOT } from './serve.mjs';
 import { launchBrowser } from './browser.mjs';
 
-const OUT = path.join(ROOT, 'test-results', 'shots');
+const OUT = path.resolve(process.env.SHOT_OUT || path.join(ROOT, 'test-results', 'shots'));
 fs.mkdirSync(OUT, { recursive: true });
 const srv = await serve();
 const browser = await launchBrowser();
@@ -12,16 +12,24 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', e => console.log('pageerror', e.message));
 await page.goto(`http://127.0.0.1:${srv.address().port}/?test&q=2`);
 await page.waitForFunction(() => window.TPH && window.TPH.ready, null, { timeout: 90000 });
-const shot = async (name, script) => {
-  await page.evaluate(`window.TPH.run(false); ${script}; window.TPH.step(1 / 60);`);
-  await page.evaluate(() => new Promise(r => { window.TPH.run(true); requestAnimationFrame(() => requestAnimationFrame(() => { window.TPH.run(false); r(); })); }));
-  await page.screenshot({ path: path.join(OUT, name + '.png') });
+await page.evaluate(() => window.TPH.seed(61));
+const shot = async (name, script, target = page) => {
+  await target.evaluate(`window.TPH.run(false); ${script}; window.TPH.step(1 / 60);`);
+  await target.evaluate(() => new Promise(r => { window.TPH.run(true); requestAnimationFrame(() => requestAnimationFrame(() => { window.TPH.run(false); r(); })); }));
+  await target.screenshot({ path: path.join(OUT, name + '.png') });
   console.log('saved', name);
 };
 await shot('01-wide', 'TPH.start(0); TPH.step(1)');
-await shot('02-windup', 'TPH.start(0); TPH.step(1); TPH.aim(-85, -45); TPH.step(0.3); TPH.closeUp(300, 100, 760)');
+await shot('02-windup', 'TPH.start(0); TPH.toPerch(); TPH.setStash(["can", "can", "can"]); TPH.step(1); TPH.aim(-85, -45); TPH.step(0.3); TPH.closeUp(300, 100, 760)');
 await shot('03-release', 'TPH.release(); TPH.step(0.06)');
-await shot('04-hidden', 'TPH.closeUp(0); TPH.start(0); TPH.hide(true); TPH.step(1); TPH.closeUp(240, 110, 760)');
+await shot('03b-impact', `
+  TPH.start(0); TPH.toPerch(); TPH.setStash(["melon"]); TPH.step(1);
+  const before = TPH.info().boxes;
+  TPH.fireDrag(-75, -42);
+  for (let frame = 0; frame < 180 && TPH.info().boxes >= before; frame++) TPH.step(1 / 60);
+  TPH.closeUp(930, 170, 1050);
+`);
+await shot('04-hidden', 'TPH.closeUp(0); TPH.start(0); TPH.toPerch(); TPH.hide(true); TPH.step(1); TPH.closeUp(240, 110, 760)');
 // the maze
 await shot('10-maze-run', 'TPH.closeUp(0); TPH.hide(false); TPH.start(0); TPH.guardsOff(); TPH.warp(-300, "g"); TPH.move(-1, 0); TPH.step(1.2)');
 await shot('11-maze-wide', 'TPH.move(0, 0); TPH.warp(-800, "g"); TPH.step(1.5); TPH.closeUp(-800, 330, 2500)');
@@ -41,5 +49,27 @@ await shot('32-win-card', 'TPH.step(1.5)');
 await shot('33-dawn', 'TPH.start(1); TPH.step(1)');
 await shot('34-noon-maze', 'TPH.start(2); TPH.guardsOff(); TPH.warp(-520, "B"); TPH.step(1.2)');
 await shot('35-dusk', 'TPH.start(3); TPH.step(1)');
+const phone = await browser.newPage({
+  viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1,
+});
+await phone.goto(`http://127.0.0.1:${srv.address().port}/?test&q=0`);
+await phone.waitForFunction(() => window.TPH?.ready, null, { timeout: 90000 });
+await phone.evaluate(() => window.TPH.seed(61));
+await shot('40-phone-landscape', 'TPH.start(0); TPH.guardsOff(); TPH.warp(-1050, "g"); TPH.step(1)', phone);
+for (const [label, target] of [['desktop', page], ['phone landscape', phone]]) {
+  const profile = await target.evaluate(async () => {
+    const T = window.TPH;
+    T.start(0); T.guardsOff(); T.warp(-1050, 'g'); T.closeUp(-1050, 160, 1250); T.step(1);
+    T.run(true);
+    const start = performance.now(), frames = T.frames;
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    const elapsed = performance.now() - start;
+    const count = T.frames - frames;
+    T.run(false);
+    return { fps: +(count * 1000 / elapsed).toFixed(1), meanFrameMs: +(elapsed / count).toFixed(1),
+      quality: T.info().quality, ...(T.renderStats?.() || {}) };
+  });
+  console.log(label, JSON.stringify(profile));
+}
 await browser.close();
 srv.close();

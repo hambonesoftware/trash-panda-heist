@@ -117,7 +117,7 @@ export function createView(canvas) {
   try {
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.6, 0.5, 0.82);
+    bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.34, 0.42, 1.02);
     composer.addPass(bloom);
     grade = new ShaderPass(GradeShader);
     composer.addPass(grade);

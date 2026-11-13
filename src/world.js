@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { M, RB, SP, CY, CA, CO, ell, put, toon, glowMat, rimU, RoundedBoxGeometry } from './gfx.js';
 import { rand, rng, lerp } from './util.js';
 import { G, ZONE, DUMP_X, DOOR_X, DOCK_Y, CAN_X, CS, THEMES } from './config.js';
+import { artMesh } from './art.js';
 
 function canvas(w, h, draw) {
   const c = document.createElement('canvas');
@@ -144,6 +145,9 @@ export function buildWorld(scene, view) {
   const hemi = new THREE.HemisphereLight(0x95a3ff, 0x3b2a52, 1.35);
   scene.add(hemi);
   const moon = new THREE.DirectionalLight(0xc9d7ff, 2.1);
+  const bounce = new THREE.DirectionalLight(0xffbb93, 0.48);
+  bounce.position.set(650, 260, 820);
+  scene.add(bounce);
   moon.position.set(-300, 1300, 1100);
   moon.target.position.set(760, 80, -60);
   moon.castShadow = true;
@@ -640,6 +644,10 @@ export function buildWorld(scene, view) {
   lid.add(put(RB(292, 8, 200, 0x2a2f45, 3, 3), 0, 0, 100));
   lid.position.set(0, 162, -104);
   lid.rotation.x = -1.85;
+  const authoredDumpster = artMesh('dumpster');
+  const authoredLid = artMesh('dumpster-lid');
+  if (authoredDumpster) d.clear().add(authoredDumpster);
+  if (authoredLid) lid.clear().add(authoredLid);
   d.add(lid);
   for (const [x, z, r] of [[-92, -66, 20], [-44, -72, 24], [10, -68, 21], [62, -72, 25], [106, -64, 19]]) d.add(put(ell(r, 1, 0.7, 1, 0x3b4052), x, 160, z));
   const pizza = RB(46, 6, 46, 0xe9dcc0, 2, 2);
@@ -651,7 +659,7 @@ export function buildWorld(scene, view) {
     g.fillStyle = 'rgba(235,240,220,0.85)'; g.fillText('WASTE CO.', 128, 34);
   }));
   const st = new THREE.Mesh(new THREE.PlaneGeometry(150, 38), toon(0xffffff, { map: stencil, rim: 0, transparent: true }));
-  d.add(put(st, -40, 120, 101.5));
+  d.add(put(st, -40, authoredDumpster ? 136 : 120, authoredDumpster ? 106 : 101.5));
   d.position.set(DUMP_X, 0, 0);
   scene.add(d);
 
@@ -698,6 +706,7 @@ export function buildWorld(scene, view) {
     rimU.rimColor.value.copy(mix(a.rim, b.rim, k));
     const night = lerp(a.night, b.night, k), cloud = lerp(a.cloud, b.cloud, k);
     W.hour = hh; W.night = night;
+    bounce.intensity = 0.48 * night;
     starMat.opacity = Math.max(0, night * 1.6 - 0.6);
     moonDisk.material.opacity = night; halo.material.opacity = night;
     moonDisk.visible = halo.visible = night > 0.02;

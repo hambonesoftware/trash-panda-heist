@@ -13,8 +13,13 @@ await page.waitForFunction(() => window.TPH && window.TPH.ready, null, { timeout
 await page.click('button[data-act=play]');
 // each meal starts out in the alley with an empty sack, so put him at the slingshot with some trash to throw
 await page.waitForFunction(() => window.TPH.info().state === 'play', null, { timeout: 15000 });
-await page.evaluate(() => { window.TPH.toPerch(); if (!window.TPH.info().stash) window.TPH.setStash(['can', 'can', 'can']); });
-await page.waitForFunction(() => window.TPH.info().canAim, null, { timeout: 30000 });
+const start = await page.evaluate(() => window.TPH.info());
+if (start.where !== 'roam' || start.x > -1400 || start.stash !== 0 || start.loaded !== null) {
+  throw new Error('Expected an empty-handed start on the far side of the alley');
+}
+// Isolate the real mouse and keyboard interactions from patrol timing.
+await page.evaluate(() => { window.TPH.toPerch(); window.TPH.setStash(['can']); });
+await page.waitForFunction(() => window.TPH.info().canAim, null, { timeout: 25000 });
 const p = await page.evaluate(() => window.TPH.pouchScreen());
 await page.mouse.move(p.x, p.y);
 await page.mouse.down();

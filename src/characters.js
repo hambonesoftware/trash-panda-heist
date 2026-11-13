@@ -3,6 +3,7 @@ import { M, RB, SP, CY, CA, CO, ell, put, toon, glowMat, RoundedBoxGeometry } fr
 import { joint, Rig, clip } from './rig.js';
 import { rand, rng, lerp } from './util.js';
 import { SPEC } from './config.js';
+import { artMesh, replaceJointArt } from './art.js';
 
 const P = (base, o) => ({ ...base, ...o });
 
@@ -140,6 +141,8 @@ function buildSlingshot() {
   g.add(stick(new THREE.Vector3(0, 0, 0), b, 2.6, 2.1, WOOD));
   g.add(put(SP(2.6, 0x6b3f25, 1.2, 10, 8), a.x, a.y, a.z));
   g.add(put(SP(2.6, 0x6b3f25, 1.2, 10, 8), b.x, b.y, b.z));
+  const sculpt = artMesh('slingshot');
+  if (sculpt) g.clear().add(sculpt);
   const mk = (x, y, z) => { const o = new THREE.Object3D(); o.position.set(x, y, z); g.add(o); return o; };
   return { group: g, tipA: mk(a.x, a.y, a.z), tipB: mk(b.x, b.y, b.z), fork: mk(0, 17, 0), grip: mk(0, -14, 0) };
 }
@@ -212,6 +215,7 @@ export function buildRaccoon() {
     J['tail' + i].add(put(ell(tailR[i], 1, 1.05, 0.95, i % 2 ? DARK : i === 4 ? FUR2 : FUR), nxt[0] * 0.5, nxt[1] * 0.5, 0));
   }
 
+  replaceJointArt('raccoon', { ...J, eyes });
   const sling = buildSlingshot();
   sling.group.position.set(36, 76, 22);
   root.add(sling.group);
@@ -407,6 +411,21 @@ export function buildWorker(palette = {}) {
     J['foot' + s].add(put(RB(36, 15, 22, BOOT, 2, 6), 9, 4, 0));
   }
 
+  replaceJointArt('worker', J);
+  for (const [name, color] of [['Uniform shirt', palette.SHIRT],
+    ['Uniform apron', palette.APRON], ['Uniform cap', palette.CAP]]) {
+    if (color === undefined) continue;
+    const replacements = new Map();
+    root.traverse(mesh => {
+      if (!mesh.isMesh || mesh.material.name !== name) return;
+      if (!replacements.has(mesh.material)) {
+        const material = mesh.material.clone();
+        material.color.setHex(color);
+        replacements.set(mesh.material, material);
+      }
+      mesh.material = replacements.get(mesh.material);
+    });
+  }
   const bang = new THREE.Group(), bangMat = glowMat(0xffd23f, 1.6);
   bang.add(put(new THREE.Mesh(new RoundedBoxGeometry(11, 30, 11, 2, 3), bangMat), 0, 18, 0));
   bang.add(put(new THREE.Mesh(new THREE.SphereGeometry(7, 12, 10), bangMat), 0, -8, 0));
@@ -442,17 +461,19 @@ function sticker(label) {
 
 export function boxMesh(type) {
   const s = SPEC[type];
-  const geo = geoCache[type] || (geoCache[type] = new RoundedBoxGeometry(s.w, s.h, s.d, 2, 3));
   const g = new THREE.Group(), inner = new THREE.Group();
-  const skin = M(geo, s.color, 2.2);
+  const authored = artMesh(type === 'crate' ? 'crate' : 'carton');
+  const geo = authored ? null : (geoCache[type] ||= new RoundedBoxGeometry(s.w, s.h, s.d, 2, 3));
+  const skin = authored || M(geo, s.color, 2.2);
+  if (authored && type === 'small') skin.scale.set(s.w / 60, s.h / 60, s.d / 56);
   inner.add(skin);
-  if (type === 'crate') {
+  if (type === 'crate' && !authored) {
     for (const y of [-0.32, 0.32]) inner.add(put(RB(s.w + 1.6, s.h * 0.15, s.d + 1.6, 0x6e4622, 0, 1.5), 0, y * s.h, 0));
     const brace = RB(s.w * 1.2, 6, 2, 0x6e4622, 0, 1);
     brace.rotation.z = 0.78;
     inner.add(put(brace, 0, 0, s.d / 2 + 0.6));
-  } else {
-    inner.add(RB(s.w * 0.2, s.h + 1.4, s.d + 1.4, 0xead6a6, 0, 1));
+  } else if (type !== 'crate') {
+    if (!authored) inner.add(RB(s.w * 0.2, s.h + 1.4, s.d + 1.4, 0xead6a6, 0, 1));
     if (rng() < 0.55) {
       const label = ['FRAGILE', 'UP', 'MEGA', 'PRODUCE'][Math.floor(rng() * 4)];
       const st = new THREE.Mesh(new THREE.PlaneGeometry(s.w * 0.42, s.h * 0.22), sticker(label));
@@ -466,6 +487,8 @@ export function boxMesh(type) {
 }
 
 export function ammoMesh(type) {
+  const authored = artMesh('ammo-' + type);
+  if (authored) return authored;
   const g = new THREE.Group();
   if (type === 'can') {
     const pts = [[0, -14], [10, -14], [12, -12], [12.4, 10], [11, 13], [9.5, 14], [0, 14]].map(([x, y]) => new THREE.Vector2(x, y));
