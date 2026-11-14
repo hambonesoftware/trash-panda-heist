@@ -212,22 +212,66 @@ def finish():
         bpy.context.object.select_set(False)
 
 
+def raccoon_head():
+    """A single sculpted head surface with fur markings painted on its vertices."""
+    # x, center height, vertical radius, cheek width
+    profile = [(-22, 18, .7, 1), (-20, 19, 9, 12), (-16, 20, 15, 20),
+               (-10, 20, 19, 25), (-3, 20, 21, 27), (5, 20, 22, 27),
+               (13, 19, 21, 25), (20, 17, 18, 22), (25, 15, 14, 17),
+               (30, 13, 9, 12), (34, 12, 5, 7), (36, 12, .6, 1)]
+    sides = 64
+    verts, faces = [], []
+    for j in range((len(profile) - 1) * 4 + 1):
+        i = min(j // 4, len(profile) - 2)
+        t = j / 4 - i
+        a, b = profile[i:i+2]
+        before = profile[max(0, i-1)]
+        after = profile[min(len(profile)-1, i+2)]
+        x, cy, h, w = (
+            (2*t**3-3*t*t+1)*u + (t**3-2*t*t+t)*(v-q)*.5
+            + (-2*t**3+3*t*t)*v + (t**3-t*t)*(r-u)*.5
+            for q, u, v, r in zip(before, a, b, after)
+        )
+        for k in range(sides):
+            angle = math.tau * k / sides
+            dy, dz = math.cos(angle), math.sin(angle)
+            cheek = math.exp(-((x + 8) / 13)**2) * abs(dz)**6
+            tuft = cheek * (3.2 + 2.1 * math.cos((dy+.24)*14))
+            verts.append((x - tuft, cy + dy*h, dz*(w+tuft)))
+    for row in range(len(verts)//sides-1):
+        for k in range(sides):
+            a = row*sides+k
+            b = row*sides+(k+1)%sides
+            faces.append((a,b,b+sides,a+sides))
+    faces.extend([tuple(reversed(range(sides))), tuple(range(len(verts)-sides,len(verts)))])
+    obj = surface("Sculpted head and cheek silhouette", verts, faces,
+                  material("Painted raccoon fur", "ffffff", .86))
+    colors = obj.data.color_attributes.new(name="Fur markings", type="FLOAT_COLOR", domain="POINT")
+    base, light, dark, brow = [tuple(m.diffuse_color) for m in (fur, cream, mask, silver)]
+
+    def blend(a, b, t):
+        t = max(0, min(1, t))
+        t = t*t*(3-2*t)
+        return tuple(u+(v-u)*t for u,v in zip(a,b))
+
+    for i, (x,y,z) in enumerate(verts):
+        cheek_line = 16.5 + 2.3*math.sin((x+9)*.16)
+        c = blend(base, light, (cheek_line-y)/2.6)
+        eye_center = 22.5 - .24*(x-17)
+        mask_shape = ((x-16)/19)**2 + ((y-eye_center)/8.1)**2
+        c = blend(c, dark, (1.12-mask_shape)*5)
+        eyebrow = ((x-16)/9.4)**2 + ((y-(31+.14*(x-16)))/2.4)**2
+        c = blend(c, brow, (1.04-eyebrow)*4)
+        colors.data[i].color = c
+    shader = obj.data.materials[0].node_tree
+    vertex_color = shader.nodes.new("ShaderNodeVertexColor")
+    vertex_color.layer_name = colors.name
+    shader.links.new(vertex_color.outputs["Color"], shader.nodes.get("Principled BSDF").inputs["Base Color"])
+
+
 def raccoon():
     socket("raccoon.head")
-    # Wider cheekbones, a high forehead and a short tapered muzzle.
-    loft([(-19, 17, 0, 2, 3), (-17, 18, 0, 11, 14),
-          (-10, 19, 0, 17, 21), (0, 19, 0, 20, 24),
-          (10, 18, 0, 20, 25), (19, 17, 0, 17, 22),
-          (27, 15, 0, 12, 16), (31, 13, 0, 7, 10)], fur, 32, "x")
-    for side in (-1, 1):
-        loft([(-22, 14, side * 22, .3, .4), (-15, 13, side * 22, 4.6, 4.8),
-              (-5, 12, side * 21, 6.3, 6.6), (8, 12, side * 19, 6, 6),
-              (19, 13, side * 14, 4, 4), (27, 12, side * 9, 2, 2)], cream, 20, "x")
-        loft([(-22, 21, side * 22, .2, .3), (-13, 20, side * 22, 3.9, 4.8),
-              (0, 19, side * 21, 5.4, 5.8), (13, 19, side * 18, 4, 4.8)],
-             silver, 16, "x")
-        oval((15.5, 21, side * 18), (13.5, 7.9, 6.7), mask, -.24, sides=24)
-        oval((16, 29, side * 17), (8.8, 2.1, 3.8), silver, .17)
+    raccoon_head()
     oval((28, 10.7, 0), (10.7, 6.4, 11.1), cream, -.12, sides=24)
     oval((37, 12.5, 0), (4.4, 3.4, 5.9), nose, -.17, sides=24, taper=.45)
     oval((39, 14.6, 2.7), (1.45, .58, 1.27), glint)
@@ -240,10 +284,10 @@ def raccoon():
 
     socket("raccoon.eyes")
     for side in (-1, 1):
-        oval((.3, 1, side * 18.2), (5.3, 5.8, 5), white)
-        oval((3.7, 1.1, side * 21.5), (2.5, 4, 2.6), iris)
-        oval((4.7, 1.2, side * 22.7), (1.7, 2.9, 1.6), nose)
-        oval((5.3, 2.9, side * 23.8), (.7, .9, .6), glint, sides=8)
+        oval((1.5, 1.2, side * 21.0), (6.1, 5.9, 5.4), white)
+        oval((3.7, 1.1, side * 24.7), (2.6, 4.25, 2.8), iris)
+        oval((4.7, 1.2, side * 26.0), (1.9, 3, 1.6), nose)
+        oval((5.3, 2.9, side * 27.15), (.82, .95, .65), glint, sides=8)
     finish()
 
     for name in ("earL", "earR"):
@@ -296,8 +340,11 @@ def raccoon():
 def build_tail(rig, pivots):
     """Sweep one continuous profile and skin it along the five tail joints."""
     points = [pivots[f"tail{i}"] for i in range(5)]
-    points.append(points[-1] + Vector(xyz((7, 15, 0))))
-    widths = [6.4, 10.7, 13.2, 12.6, 9, .4]
+    # Pull the silhouette behind the hips so the stripes read in the side camera.
+    points = [point + Vector(xyz(offset)) for point, offset in zip(points,
+              [(0,0,0),(-4,-3,0),(-10,-8,0),(-17,-13,0),(-24,-16,0)])]
+    points.append(points[-1] + Vector(xyz((-14, 9, 0))))
+    widths = [7, 11.8, 15.2, 15.6, 12.8, .55]
     bands = [fur, stripe, silver, stripe, mask]
     sides, steps = 20, 5
     vertices, faces = [], []
@@ -438,16 +485,29 @@ def skin_raccoon():
     bpy.ops.object.mode_set(mode="OBJECT")
     groups = {name: body.vertex_groups.new(name="skin_" + name) for name in body_joints}
     body.data.materials.clear()
-    body.data.materials.append(fur)
-    body.data.materials.append(mask)
+    coat = material("Painted raccoon coat", "ffffff", .83)
+    body.data.materials.append(coat)
+    coat_colors = []
+    shader = coat.node_tree
+    color_node = shader.nodes.new("ShaderNodeVertexColor")
+    color_node.layer_name = "Coat markings"
+    shader.links.new(color_node.outputs["Color"], shader.nodes.get("Principled BSDF").inputs["Base Color"])
     for vertex in body.data.vertices:
         ranked = sorted((distance(vertex.co, name), name) for name in body_joints)[:3]
         weights = [math.exp(-(d - ranked[0][0]) / 2.3) for d, _ in ranked]
         for weight, (_, name) in zip(weights, ranked):
             groups[name].add([vertex.index], weight / sum(weights), "REPLACE")
+        # Blend dark paws and forearms by normalized joint influence.
+        dark = sum(weight for weight, (_, name) in zip(weights, ranked)
+                   if name.startswith(("hand", "foot", "shin"))) / sum(weights)
+        warm = max(0, min(1, (vertex.co.x - 6) / 12)) * (1-dark)
+        coat_colors.append(tuple(
+            f * (1-dark-warm*.22) + d * dark + c * warm*.22
+            for f, d, c in zip(fur.diffuse_color, mask.diffuse_color, cream.diffuse_color)
+        ))
+    colors = body.data.color_attributes.new(name="Coat markings", type="FLOAT_COLOR", domain="POINT")
+    colors.data.foreach_set("color", [channel for color in coat_colors for channel in color])
     for face in body.data.polygons:
-        nearest = min(body_joints, key=lambda name: distance(face.center, name))
-        face.material_index = int(nearest.startswith(("hand", "foot", "shin")))
         face.use_smooth = True
     modifier = body.modifiers.new("Raccoon skin deformation", "ARMATURE")
     modifier.object = rig
@@ -695,4 +755,4 @@ target = ROOT / "assets"
 target.mkdir(exist_ok=True)
 bpy.ops.wm.save_as_mainfile(filepath=str(ROOT / "art" / "midnight.blend"), compress=True)
 bpy.ops.export_scene.gltf(filepath=str(target / "midnight.glb"), export_format="GLB",
-                          export_texcoords=False, export_cameras=False, export_lights=False)
+                          export_texcoords=False, export_vertex_color="MATERIAL", export_cameras=False, export_lights=False)
