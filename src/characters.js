@@ -45,7 +45,7 @@ function runClip(name, rig, scared) {
     const p = P(S, {
       spine: [0, 0, -16], chest: [0, 0, -10], neck: [0, 0, 8], head: [0, 0, scared ? -6 : 12], '@hips': [0, i % 2 ? 6 : -2, 0],
       thighR: [0, 0, r[0]], shinR: [0, 0, r[1]], footR: [0, 0, r[2]], thighL: [0, 0, l[0]], shinL: [0, 0, l[1]], footL: [0, 0, l[2]],
-      tail0: [0, 0, 62], tail1: [0, 0, 10], tail2: [0, 0, 10],
+      tail0: [0, -16 - c * 5, 46], tail1: [0, -6, 8], tail2: [0, 0, 10],
     });
     if (scared) Object.assign(p, { uarmR: [0, 0, 170 + c * 15], farmR: [0, 0, 30], uarmL: [0, 0, 160 - c * 15], farmL: [0, 0, 30], earL: [-16, 0, 40], earR: [16, 0, 40] });
     else Object.assign(p, { uarmR: [0, 0, -c * 50], farmR: [0, 0, 80], uarmL: [0, 0, c * 50], farmL: [0, 0, 80] });
@@ -217,6 +217,17 @@ export function buildRaccoon() {
 
   skinRaccoon(root, J);
   replaceJointArt('raccoon', { ...J, eyes });
+  const groom = [];
+  const eyelids = [];
+  root.traverse(mesh => {
+    if (mesh.userData.raccoonGroom) groom.push(mesh);
+  });
+  eyes.traverse(mesh => {
+    const targets = mesh.morphTargetDictionary;
+    if (targets?.blink !== undefined && targets.focus !== undefined && targets.alert !== undefined) {
+      eyelids.push({ weights: mesh.morphTargetInfluences, ...targets });
+    }
+  });
   const sling = buildSlingshot();
   sling.group.position.set(36, 76, 22);
   root.add(sling.group);
@@ -227,7 +238,7 @@ export function buildRaccoon() {
   const rig = new Rig(root, J);
   raccoonClips(rig);
   rig.play('idle', 0);
-  return { outer, root, J, rig, eyes, sling, sackAnchor, windup: rig.compile(R_WINDUP) };
+  return { outer, root, J, rig, eyes, eyelids, sling, sackAnchor, groom, windup: rig.compile(R_WINDUP) };
 }
 
 // Rubber band and pouch live in world space so they can stretch freely between the fork tips and the drag point.

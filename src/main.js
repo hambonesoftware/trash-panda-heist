@@ -40,6 +40,7 @@ let maze = mazeArts[0];
 // ---------- characters ----------
 const rac = buildRaccoon();
 scene.add(rac.outer);
+const GROOM_RANGE = [1050, 2900, 3900];
 const STAND = new THREE.Vector3(RAC_X, 0, 24);
 const HIDE_POS = new THREE.Vector3(CAN_X + 4, 66, 0);
 rac.outer.position.copy(STAND);
@@ -1083,6 +1084,26 @@ function updateWorker(dt) {
 // ---------- raccoon ----------
 const tipA = new THREE.Vector3(), tipB = new THREE.Vector3(), gripW = new THREE.Vector3(), pouchW = new THREE.Vector3();
 
+function poseRaccoonFace(blink, focus, alert) {
+  if (!rac.eyelids.length) {
+    rac.eyes.scale.y = lerp(1, .12, blink) * lerp(1, .6, focus);
+    return;
+  }
+  for (const lid of rac.eyelids) {
+    lid.weights[lid.blink] = blink;
+    lid.weights[lid.focus] = focus * (1 - blink);
+    lid.weights[lid.alert] = alert * (1 - blink) * (1 - focus);
+  }
+}
+
+function updateRaccoonFace(dt, focus = 0, alert = 0) {
+  rc.blink -= dt;
+  if (rc.blink < -.12) rc.blink = rand(1.5, 4);
+  // Keep the original blink cadence and close/reopen the lids over a few frames.
+  const blink = 1 - smooth(clamp(Math.abs(rc.blink + .055) / .065, 0, 1));
+  poseRaccoonFace(blink, focus, alert);
+}
+
 function updateRaccoon(dt) {
   const g = rac.outer, rig = rac.rig, J = rac.J;
   rc.invuln = Math.max(0, rc.invuln - dt);
@@ -1139,6 +1160,7 @@ function updateRaccoon(dt) {
       if (!rc.splashed && k > 0.3) { rc.splashed = true; burst(1050, 190, 0, 14, 0xf2c14e, 320, 10); burst(1050, 190, 0, 8, 0x3b4052, 260, 12); }
     }
     rig.update(dt);
+    poseRaccoonFace(0, 0, .3);
     return;
   }
   if (state === 'lost') {
@@ -1151,6 +1173,7 @@ function updateRaccoon(dt) {
     g.position.x -= 520 * dt;
     g.position.y = 0;
     rig.update(dt);
+    poseRaccoonFace(0, 0, .9);
     if (endT > 1.1 && !overlay.classList.contains('show')) showLose();
     return;
   }
@@ -1183,9 +1206,9 @@ function updateRaccoon(dt) {
     rc.tailV += (-(rc.tailA + clamp(vx, -400, 400) * 0.0012) * 60 - rc.tailV * 9) * dt;
     rc.tailA += rc.tailV * dt;
     for (let i = 0; i < 5; i++) J['tail' + i].rotateZ(rc.tailA * (0.3 + i * 0.2));
-    rc.blink -= dt;
-    if (rc.blink < -0.12) rc.blink = rand(1.5, 4);
-    rac.eyes.scale.y = rc.blink < 0 ? 0.12 : 1;
+    const focus = ra.mode === 'ladder' ? .42 : rumCan ? .53 : ra.moving ? .24 : 0;
+    const alert = rc.mode === 'hit' || ra.mode === 'fall' ? .95 : chased ? .7 : .13;
+    updateRaccoonFace(dt, focus, alert);
     if (ra.mode === 'rope') {
       // hand over hand along the line
       g.updateMatrixWorld(true);
@@ -1227,9 +1250,7 @@ function updateRaccoon(dt) {
   rc.tailV += (-(rc.tailA + vx * 0.0015) * 60 - rc.tailV * 9) * dt;
   rc.tailA += rc.tailV * dt;
   for (let i = 0; i < 5; i++) J['tail' + i].rotateZ(rc.tailA * (0.3 + i * 0.2) + Math.sin(time * 2.1 + i * 0.7) * 0.03);
-  rc.blink -= dt;
-  if (rc.blink < -0.12) rc.blink = rand(1.5, 4);
-  rac.eyes.scale.y = rc.blink < 0 ? 0.12 : lerp(1, 0.6, rc.aimW);
+  updateRaccoonFace(dt, Math.max(rc.aimW, .65 * h), rc.mode === 'hit' || rc.mode === 'pop' ? .86 : .12);
 
   const slingOn = h < 0.35 && rc.mode !== 'duck';
   rac.sling.group.visible = slingOn;
@@ -1476,6 +1497,9 @@ function frame(now) {
   while (lag >= STEP && n < MAX_CATCHUP) { update(STEP); lag -= STEP; n++; }
   if (n === MAX_CATCHUP) lag = 0;
   view.watch(real);
+  const groomRange = GROOM_RANGE[view.quality];
+  const showGroom = camera.position.distanceToSquared(rac.outer.position) <= groomRange ** 2;
+  for (const mesh of rac.groom) mesh.visible = showGroom;
   view.render(real, time);
   frames++;
 }
@@ -1516,6 +1540,9 @@ if (TEST) {
     ready: true,
     artReady,
     hasRaccoonSkin: () => rac.root.children.some(mesh => mesh.isSkinnedMesh && mesh.skeleton.bones.includes(rac.J.chest)),
+    hasRaccoonGroom: () => rac.groom.some(mesh =>
+      mesh.isSkinnedMesh && mesh.skeleton.bones.includes(rac.J.tail4)),
+    hasRaccoonEyelids: () => rac.eyelids.length > 0,
     renderStats: () => ({ ...view.renderer.info.render, ...view.renderer.info.memory }),
     get frames() { return frames; },
     run(v) { running = v; last = performance.now(); lag = 0; },

@@ -33,12 +33,21 @@ const browser = await launchBrowser();
 async function openPage(contextOpts, label) {
   const { quality, ...opts } = contextOpts;
   const context = await browser.newContext(opts);
+  // Keep the real Web Audio clock and nodes independent of the test host's speakers.
+  await context.addInitScript(() => {
+    const NativeAudioContext = window.AudioContext;
+    if (NativeAudioContext && 'sinkId' in NativeAudioContext.prototype) {
+      window.AudioContext = class extends NativeAudioContext {
+        constructor(options) { super({ ...options, sinkId: { type: 'none' } }); }
+      };
+    }
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', e => errors.push(e.message));
   page.on('requestfailed', r => errors.push('request failed: ' + r.url()));
-  await page.goto(BASE + '&q=' + (contextOpts.quality ?? 1), { waitUntil: 'load' });
+  await page.goto(BASE + '&q=' + (quality ?? 1), { waitUntil: 'domcontentloaded', timeout: 90000 });
   await page.waitForFunction(() => window.TPH && window.TPH.ready, null, { timeout: 90000 });
   page.label = label;
   page.errors = errors;
@@ -129,7 +138,8 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
     await until(page, () => window.TPH.frames > 20, null, 30000, 'frames');
   });
   await check('Blender glTF sockets loaded for gameplay', async () => {
-    assert(await page.evaluate(() => window.TPH.artReady() && window.TPH.hasRaccoonSkin()), 'missing authored sockets or raccoon skin binding');
+    assert(await page.evaluate(() => TPH.artReady() && TPH.hasRaccoonSkin() && TPH.hasRaccoonGroom() && TPH.hasRaccoonEyelids()),
+      'missing authored sockets, raccoon skin binding, skinned fur, or eyelid shapes');
   });
   await check('Play button starts level 1', async () => {
     await page.click('button[data-act=play]');
@@ -525,6 +535,7 @@ for (const ph of PHONES) {
   await check('touch: RAID button, then drag anywhere to run', async () => {
     await page.evaluate(() => { window.TPH.start(0); window.TPH.guardsOff(); });
     await ready(page);
+    await until(page, () => !document.getElementById('raidBtn').hidden, null, 3000, 'raid button shown');
     const c = await center(page, '#raidBtn');
     await page.touchscreen.tap(c.x, c.y);
     await until(page, () => window.TPH.info().where === 'roam', null, 2000, 'on foot');

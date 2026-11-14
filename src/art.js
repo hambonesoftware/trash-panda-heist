@@ -10,6 +10,12 @@ export async function loadArt() {
     for (const socket of scene.children) {
       socket.traverse(node => {
         if (!node.isMesh) return;
+        if (node.userData.raccoonGroom) {
+          // The solid undercoat supplies the shadow. Keep the fine cutout hairs
+          // out of the shadow map.
+          node.material.alphaToCoverage = true;
+          return;
+        }
         node.castShadow = true;
         node.receiveShadow = true;
       });
@@ -49,11 +55,24 @@ export function skinRaccoon(root, joints) {
   // Rebind cloned skinned meshes to the existing AnimationMixer joints.
   const skinMeshes = [];
   body.traverse(mesh => { if (mesh.isSkinnedMesh) skinMeshes.push(mesh); });
-  if (!skinMeshes.length) return;
-  const names = new Set(skinMeshes[0].skeleton.bones.map(bone => bone.name.slice(5)));
+  if (!skinMeshes.length || skinMeshes.some(mesh =>
+    mesh.skeleton.bones.some(bone => !joints[bone.name.slice(5)]))) return;
+  const sourceBones = skinMeshes[0].skeleton.bones;
+  const tailNames = ['tail0', 'tail1', 'tail2', 'tail3', 'tail4'];
+  // Transfer the authored rest offsets without changing the animation axes.
+  const point = new THREE.Vector3(), parent = new THREE.Vector3();
+  for (const name of tailNames) {
+    const bone = sourceBones.find(node => node.name === 'skin_' + name);
+    if (!bone) continue;
+    bone.getWorldPosition(point);
+    bone.parent.getWorldPosition(parent);
+    joints[name].position.copy(point.sub(parent));
+  }
+  const names = new Set(sourceBones.map(bone => bone.name.slice(5)));
   for (const name of names) {
-    for (const child of joints[name].children.slice()) {
-      if (child.isMesh) joints[name].remove(child);
+    const joint = joints[name];
+    for (const child of joint.children.slice()) {
+      if (child.isMesh) joint.remove(child);
     }
   }
   // GLTFLoader splits the material primitives into separate meshes. Bind all

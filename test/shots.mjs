@@ -10,7 +10,9 @@ const srv = await serve();
 const browser = await launchBrowser();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', e => console.log('pageerror', e.message));
-await page.goto(`http://127.0.0.1:${srv.address().port}/?test&q=2`);
+await page.goto(`http://127.0.0.1:${srv.address().port}/?test&q=2`, {
+  waitUntil: 'domcontentloaded', timeout: 90000,
+});
 await page.waitForFunction(() => window.TPH && window.TPH.ready, null, { timeout: 90000 });
 await page.evaluate(() => window.TPH.seed(61));
 const shot = async (name, script, target = page) => {
