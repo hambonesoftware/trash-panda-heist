@@ -8,7 +8,9 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto(url + (url.includes('?') ? '&' : '?') + 'test&q=1');
+await page.goto(url + (url.includes('?') ? '&' : '?') + 'test&q=1', {
+  waitUntil: 'domcontentloaded', timeout: 90000,
+});
 await page.waitForFunction(() => window.TPH && window.TPH.ready, null, { timeout: 90000 });
 await page.click('button[data-act=play]');
 // each meal starts out in the alley with an empty sack, so put him at the slingshot with some trash to throw

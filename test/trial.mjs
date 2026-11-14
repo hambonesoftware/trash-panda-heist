@@ -496,7 +496,6 @@ for (const ph of PHONES) {
     try {
       await touchDrag(cdp, p, -150 * k, 70 * k);
     } finally {
-      await touchUp(cdp);
       await page.evaluate(() => window.TPH.run(true));
     }
     await until(page, () => window.TPH.info().throws === 1, null, 3000, 'throw');
