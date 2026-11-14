@@ -3,6 +3,7 @@ import { M, RB, SP, CY, CA, CO, ell, put, toon, glowMat, RoundedBoxGeometry } fr
 import { joint, Rig, clip } from './rig.js';
 import { rand, rng, lerp } from './util.js';
 import { SPEC } from './config.js';
+import { artMesh, replaceJointArt, skinRaccoon } from './art.js';
 
 const P = (base, o) => ({ ...base, ...o });
 
@@ -22,6 +23,13 @@ export const R_STAND = {
   earL: [-16, 0, 0], earR: [16, 0, 0],
   uarmR: [0, 0, 25], farmR: [0, 0, 35], uarmL: [0, 0, 45], farmL: [0, 0, 35],
   thighR: [0, 0, 8], shinR: [0, 0, -14], footR: [0, 0, 6], thighL: [0, 0, -6], shinL: [0, 0, -10], footL: [0, 0, 16],
+  tail0: [0, 0, 22], tail1: [0, 0, -8], tail2: [0, 0, -12], tail3: [0, 0, -12], tail4: [0, 0, -8],
+};
+const R_PROWL = {
+  '@hips': [-2, -5, 0], hips: [0, 0, 0], spine: [0, 0, -10], chest: [0, 0, -8], neck: [0, 0, 6], head: [0, 0, 9],
+  earL: [-16, 0, 0], earR: [16, 0, 0],
+  uarmR: [0, 0, 25], farmR: [0, 0, 35], uarmL: [0, 0, 45], farmL: [0, 0, 35],
+  thighR: [0, 0, 28], shinR: [0, 0, -54], footR: [0, 0, 26], thighL: [0, 0, 22], shinL: [0, 0, -49], footL: [0, 0, 27],
   tail0: [0, 0, 22], tail1: [0, 0, -8], tail2: [0, 0, -12], tail3: [0, 0, -12], tail4: [0, 0, -8],
 };
 export const R_WINDUP = {
@@ -44,7 +52,7 @@ function runClip(name, rig, scared) {
     const p = P(S, {
       spine: [0, 0, -16], chest: [0, 0, -10], neck: [0, 0, 8], head: [0, 0, scared ? -6 : 12], '@hips': [0, i % 2 ? 6 : -2, 0],
       thighR: [0, 0, r[0]], shinR: [0, 0, r[1]], footR: [0, 0, r[2]], thighL: [0, 0, l[0]], shinL: [0, 0, l[1]], footL: [0, 0, l[2]],
-      tail0: [0, 0, 62], tail1: [0, 0, 10], tail2: [0, 0, 10],
+      tail0: [0, -16 - c * 5, 46], tail1: [0, -6, 8], tail2: [0, 0, 10],
     });
     if (scared) Object.assign(p, { uarmR: [0, 0, 170 + c * 15], farmR: [0, 0, 30], uarmL: [0, 0, 160 - c * 15], farmL: [0, 0, 30], earL: [-16, 0, 40], earR: [16, 0, 40] });
     else Object.assign(p, { uarmR: [0, 0, -c * 50], farmR: [0, 0, 80], uarmL: [0, 0, c * 50], farmL: [0, 0, 80] });
@@ -59,6 +67,11 @@ function raccoonClips(rig) {
     [0, S],
     [1.3, P(S, { '@hips': [0, -2.2, 0], chest: [0, 0, -7], neck: [0, 0, 1], head: [0, 5, 8], earR: [16, 0, -14], tail0: [0, 0, 28], tail1: [0, 0, -2], tail2: [0, 0, -6], '^chest': [1, 1.03, 1.04] })],
     [2.6, S],
+  ], rig));
+  rig.add(clip('prowlIdle', [
+    [0, R_PROWL],
+    [1.3, P(R_PROWL, { '@hips': [-2, -6.2, 0], chest: [0, 0, -10], head: [0, 5, 11], earR: [16, 0, -14], tail0: [0, 0, 28], tail1: [0, 0, -2], tail2: [0, 0, -6], '^chest': [1, 1.03, 1.04] })],
+    [2.6, R_PROWL],
   ], rig));
   rig.add(clip('release', [
     [0, W],
@@ -140,6 +153,8 @@ function buildSlingshot() {
   g.add(stick(new THREE.Vector3(0, 0, 0), b, 2.6, 2.1, WOOD));
   g.add(put(SP(2.6, 0x6b3f25, 1.2, 10, 8), a.x, a.y, a.z));
   g.add(put(SP(2.6, 0x6b3f25, 1.2, 10, 8), b.x, b.y, b.z));
+  const sculpt = artMesh('slingshot');
+  if (sculpt) g.clear().add(sculpt);
   const mk = (x, y, z) => { const o = new THREE.Object3D(); o.position.set(x, y, z); g.add(o); return o; };
   return { group: g, tipA: mk(a.x, a.y, a.z), tipB: mk(b.x, b.y, b.z), fork: mk(0, 17, 0), grip: mk(0, -14, 0) };
 }
@@ -212,6 +227,26 @@ export function buildRaccoon() {
     J['tail' + i].add(put(ell(tailR[i], 1, 1.05, 0.95, i % 2 ? DARK : i === 4 ? FUR2 : FUR), nxt[0] * 0.5, nxt[1] * 0.5, 0));
   }
 
+  skinRaccoon(root, J);
+  replaceJointArt('raccoon', { ...J, eyes });
+  const groom = [];
+  const eyelids = [];
+  const expressions = [];
+  root.traverse(mesh => {
+    if (mesh.userData.raccoonGroom) groom.push(mesh);
+  });
+  eyes.traverse(mesh => {
+    const targets = mesh.morphTargetDictionary;
+    if (targets?.blink !== undefined && targets.focus !== undefined && targets.alert !== undefined) {
+      eyelids.push({ weights: mesh.morphTargetInfluences, ...targets });
+    }
+  });
+  J.head.traverse(mesh => {
+    const targets = mesh.morphTargetDictionary;
+    if (targets?.browDown !== undefined && targets.browUp !== undefined && targets.muzzleTense !== undefined) {
+      expressions.push({ weights: mesh.morphTargetInfluences, ...targets });
+    }
+  });
   const sling = buildSlingshot();
   sling.group.position.set(36, 76, 22);
   root.add(sling.group);
@@ -222,7 +257,7 @@ export function buildRaccoon() {
   const rig = new Rig(root, J);
   raccoonClips(rig);
   rig.play('idle', 0);
-  return { outer, root, J, rig, eyes, sling, sackAnchor, windup: rig.compile(R_WINDUP) };
+  return { outer, root, J, rig, eyes, eyelids, expressions, sling, sackAnchor, groom, windup: rig.compile(R_WINDUP) };
 }
 
 // Rubber band and pouch live in world space so they can stretch freely between the fork tips and the drag point.
@@ -407,6 +442,21 @@ export function buildWorker(palette = {}) {
     J['foot' + s].add(put(RB(36, 15, 22, BOOT, 2, 6), 9, 4, 0));
   }
 
+  replaceJointArt('worker', J);
+  for (const [name, color] of [['Uniform shirt', palette.SHIRT],
+    ['Uniform apron', palette.APRON], ['Uniform cap', palette.CAP]]) {
+    if (color === undefined) continue;
+    const replacements = new Map();
+    root.traverse(mesh => {
+      if (!mesh.isMesh || mesh.material.name !== name) return;
+      if (!replacements.has(mesh.material)) {
+        const material = mesh.material.clone();
+        material.color.setHex(color);
+        replacements.set(mesh.material, material);
+      }
+      mesh.material = replacements.get(mesh.material);
+    });
+  }
   const bang = new THREE.Group(), bangMat = glowMat(0xffd23f, 1.6);
   bang.add(put(new THREE.Mesh(new RoundedBoxGeometry(11, 30, 11, 2, 3), bangMat), 0, 18, 0));
   bang.add(put(new THREE.Mesh(new THREE.SphereGeometry(7, 12, 10), bangMat), 0, -8, 0));
@@ -442,17 +492,19 @@ function sticker(label) {
 
 export function boxMesh(type) {
   const s = SPEC[type];
-  const geo = geoCache[type] || (geoCache[type] = new RoundedBoxGeometry(s.w, s.h, s.d, 2, 3));
   const g = new THREE.Group(), inner = new THREE.Group();
-  const skin = M(geo, s.color, 2.2);
+  const authored = artMesh(type === 'crate' ? 'crate' : 'carton');
+  const geo = authored ? null : (geoCache[type] ||= new RoundedBoxGeometry(s.w, s.h, s.d, 2, 3));
+  const skin = authored || M(geo, s.color, 2.2);
+  if (authored && type === 'small') skin.scale.set(s.w / 60, s.h / 60, s.d / 56);
   inner.add(skin);
-  if (type === 'crate') {
+  if (type === 'crate' && !authored) {
     for (const y of [-0.32, 0.32]) inner.add(put(RB(s.w + 1.6, s.h * 0.15, s.d + 1.6, 0x6e4622, 0, 1.5), 0, y * s.h, 0));
     const brace = RB(s.w * 1.2, 6, 2, 0x6e4622, 0, 1);
     brace.rotation.z = 0.78;
     inner.add(put(brace, 0, 0, s.d / 2 + 0.6));
-  } else {
-    inner.add(RB(s.w * 0.2, s.h + 1.4, s.d + 1.4, 0xead6a6, 0, 1));
+  } else if (type !== 'crate') {
+    if (!authored) inner.add(RB(s.w * 0.2, s.h + 1.4, s.d + 1.4, 0xead6a6, 0, 1));
     if (rng() < 0.55) {
       const label = ['FRAGILE', 'UP', 'MEGA', 'PRODUCE'][Math.floor(rng() * 4)];
       const st = new THREE.Mesh(new THREE.PlaneGeometry(s.w * 0.42, s.h * 0.22), sticker(label));
@@ -466,6 +518,8 @@ export function boxMesh(type) {
 }
 
 export function ammoMesh(type) {
+  const authored = artMesh('ammo-' + type);
+  if (authored) return authored;
   const g = new THREE.Group();
   if (type === 'can') {
     const pts = [[0, -14], [10, -14], [12, -12], [12.4, 10], [11, 13], [9.5, 14], [0, 14]].map(([x, y]) => new THREE.Vector2(x, y));

@@ -5,6 +5,7 @@ import { ammoMesh } from './characters.js';
 import { rand, rng } from './util.js';
 import { ROPE_UP } from './config.js';
 import { ropeSag } from './maze.js';
+import { artMesh, fireEscapeArt } from './art.js';
 
 const IRON = 0x2a2838, IRON2 = 0x3d3b52;
 
@@ -99,19 +100,24 @@ const WINDOW = {
   },
 };
 
-function tenementWall(group, W, S) {
-  const wall = new THREE.Mesh(new THREE.BoxGeometry(1500, 800, 60), toon(0xffffff, { map: wallTexture(S), rim: 0.3 }));
-  wall.position.set(-900, 400, -100);
-  wall.receiveShadow = true;
-  group.add(wall);
-  group.add(put(RB(1530, 26, 84, S.cornice, 3, 4), -900, 806, -96));
-  group.add(put(RB(1510, 18, 30, S.base, 2, 4), -900, 9, -62));
-  // drainpipe at the corner
-  group.add(put(CY(8, 8, 800, 0x565a74, 2, 14), -168, 400, -62));
-  // building-specific trim
-  if (S.band) for (const y of [268, 528]) group.add(put(RB(1500, 9, 10, S.band, 1.4, 2), -900, y, -69));
-  if (S.fins) for (const x of [-1480, -1000, -520]) group.add(put(RB(12, 800, 14, S.fins, 1.6, 2), x, 400, -68));
-  if (S.wall === 'stone') for (const x of [-1630, -170]) group.add(put(RB(26, 800, 30, S.sill, 1.6, 3), x, 400, -78));
+function tenementWall(group, W, S, facade) {
+  if (facade) {
+    facade.traverse(node => { node.castShadow = false; });
+    group.add(put(facade, -900, 0, -88));
+  } else {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(1500, 800, 60), toon(0xffffff, { map: wallTexture(S), rim: 0.3 }));
+    wall.position.set(-900, 400, -100);
+    wall.receiveShadow = true;
+    group.add(wall);
+    group.add(put(RB(1530, 26, 84, S.cornice, 3, 4), -900, 806, -96));
+    group.add(put(RB(1510, 18, 30, S.base, 2, 4), -900, 9, -62));
+    // drainpipe at the corner
+    group.add(put(CY(8, 8, 800, 0x565a74, 2, 14), -168, 400, -62));
+    // building-specific trim
+    if (S.band) for (const y of [268, 528]) group.add(put(RB(1500, 9, 10, S.band, 1.4, 2), -900, y, -69));
+    if (S.fins) for (const x of [-1480, -1000, -520]) group.add(put(RB(12, 800, 14, S.fins, 1.6, 2), x, 400, -68));
+    if (S.wall === 'stone') for (const x of [-1630, -170]) group.add(put(RB(26, 800, 30, S.sill, 1.6, 3), x, 400, -78));
+  }
 
   // windows: some lit, flickering TV glow in one
   const lit = canvasTex(96, 128, (g, w, h) => {
@@ -127,11 +133,12 @@ function tenementWall(group, W, S) {
   W.windowMats = [litMat];
   W.roomMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 1.2, 0.85), toneMapped: false });
   W.windows = [];
+  const windowFrames = facade ? new THREE.Group() : group;
   let n = 0;
   for (const y of [150, 410, 670]) for (let x = -1560; x <= -240; x += S.step) {
     if (Math.abs(x + 168) < 40) continue;
     const kind = (n++ * 7 + (y > 400 ? 3 : 0)) % 5;
-    const e = WINDOW[S.win](group, S, x, y);
+    const e = WINDOW[S.win](windowFrames, S, x, y);
     const pane = e.mk(kind === 0 || kind === 3 ? litMat : kind === 1 ? W.tvMat : dark);
     pane.position.set(x, y, -65.5);
     group.add(pane);
@@ -318,9 +325,19 @@ function buildResident(def, floor, W, group) {
 export function buildMaze(scene, nav, mazeCfg, style = 0) {
   const group = new THREE.Group();
   const W = { cans: [], wash: [], lamps: [], residents: [], group };
-  tenementWall(group, W, APARTMENTS[style]);
+  const midnight = style === 0;
+  const facade = midnight && artMesh("facade");
+  tenementWall(group, W, APARTMENTS[style], facade);
   const tints = { A: 0xd0d6ee, B: 0xe8d6c4, C: 0xd0d6ee, D: 0xe8d6c4 };
-  for (const f of nav.floors) if (f.id !== 'g') fireEscape(group, f, tints[f.id] || 0xffffff);
+  for (const f of nav.floors) {
+    if (f.id === 'g') continue;
+    if (!(midnight && fireEscapeArt(group, f))) fireEscape(group, f, tints[f.id] || 0xffffff);
+    else {
+      for (const x of [f.x0 + 3, f.x1 - 3]) {
+        group.add(put(RB(7, ROPE_UP + 16, 7, IRON2, 1.8, 2), x, f.h + (ROPE_UP + 16) / 2, 40));
+      }
+    }
+  }
   for (const l of nav.ladders) ladder(group, l);
   for (const r of nav.ropes) W.wash.push(...clothesline(group, r));
   for (const c of mazeCfg.cans) W.cans.push(trashCan(group, c, nav.byId[c.floor]));
@@ -353,7 +370,7 @@ export function buildMaze(scene, nav, mazeCfg, style = 0) {
     for (const p of W.wash) p.rotation.z = Math.sin(t * 1.7 + p.userData.ph) * 0.12;
     for (const c of W.cans) c.update(dt, t);
     const f = 0.75 + 0.25 * Math.sin(t * 9) * Math.sin(t * 2.3);
-    W.tvMat.color.setRGB(0.4 * f, 0.7 * f, 1.3 * f);
+    W.tvMat?.color.setRGB(0.4 * f, 0.7 * f, 1.3 * f);
   };
   return W;
 }
