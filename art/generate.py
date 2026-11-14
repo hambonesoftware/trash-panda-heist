@@ -276,6 +276,25 @@ def face_color(x, y, z):
     return mix(c, color_of(silver if fleck > 0 else stripe), abs(fleck) * .16)
 
 
+def shape_face(obj):
+    """Move the sculpt and its attached details with the same expression field."""
+    basis = obj.shape_key_add(name="Basis")
+    lowered = obj.shape_key_add(name="browDown")
+    raised = obj.shape_key_add(name="browUp")
+    muzzle = obj.shape_key_add(name="muzzleTense")
+    for i, vertex in enumerate(basis.data):
+        x, y, z = game_point(vertex.co)
+        brow = smooth(7, 16, abs(z)) * smooth(5, 16, x) * (1 - smooth(26, 35, x))
+        brow *= smooth(25, 32, y) * (1 - smooth(34, 41, y))
+        cheek = smooth(17, 29, x) * (1 - smooth(16, 23, y)) * smooth(5, 13, y)
+        corner = cheek * smooth(4, 12, abs(z)) * (1 - smooth(27, 38, x))
+        bridge = cheek * smooth(30, 41, x)
+        lowered.data[i].co = vertex.co + Vector(xyz((1.15*brow, -1.85*brow, math.copysign(.55*brow, z))))
+        raised.data[i].co = vertex.co + Vector(xyz((.2*brow, 2.5*brow, 0)))
+        muzzle.data[i].co = vertex.co + Vector(xyz((-.95*bridge, 1.3*bridge + 2.05*corner,
+                                                    math.copysign(1.0*corner, z))))
+
+
 def raccoon_head():
     """Shape the skull, orbital hollows, jaw and muzzle as one surface."""
     # Forward position, height, vertical radius and skull width.
@@ -1142,8 +1161,11 @@ def review_scene(rig, pivots):
     pose("uarmR", -21, (1, 0, 0))
     pose("farmL", 38, (0, 0, 1))
     pose("farmR", 15, (0, 0, 1))
-    pose("thighL", -8, (0, 0, 1))
-    pose("shinL", 8, (0, 0, 1))
+    for side, bend in (("L", 23), ("R", 29)):
+        pose("thigh" + side, bend, (0, 0, 1))
+        pose("shin" + side, -2*bend, (0, 0, 1))
+        pose("foot" + side, bend, (0, 0, 1))
+    posed.pose.bones["skin_hips"].location.y = -4
     pose("tail0", -13, (0, 0, 1))
     pose("tail1", 11, (0, 0, 1))
     pose("tail2", 14, (0, 0, 1))
@@ -1226,6 +1248,11 @@ for asset in [obj for obj in assets.objects if obj.type == "EMPTY"]:
     if not has_fur_uv:
         bpy.ops.uv.cube_project()
     bpy.ops.object.mode_set(mode="OBJECT")
+    if asset.name == "raccoon.head":
+        shape_face(mesh)
+        for child in asset.children:
+            if child.get("raccoonGroom"):
+                shape_face(child)
 
 target = ROOT / "assets"
 target.mkdir(exist_ok=True)

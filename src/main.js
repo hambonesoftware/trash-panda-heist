@@ -1085,6 +1085,11 @@ function updateWorker(dt) {
 const tipA = new THREE.Vector3(), tipB = new THREE.Vector3(), gripW = new THREE.Vector3(), pouchW = new THREE.Vector3();
 
 function poseRaccoonFace(blink, focus, alert) {
+  for (const face of rac.expressions) {
+    face.weights[face.browDown] = focus * (1 - .35 * alert);
+    face.weights[face.browUp] = Math.max(0, (alert - .15) / .85) * (1 - focus);
+    face.weights[face.muzzleTense] = Math.max(focus * .88, alert * .58);
+  }
   if (!rac.eyelids.length) {
     rac.eyes.scale.y = lerp(1, .12, blink) * lerp(1, .6, focus);
     return;
@@ -1543,6 +1548,7 @@ if (TEST) {
     hasRaccoonGroom: () => rac.groom.some(mesh =>
       mesh.isSkinnedMesh && mesh.skeleton.bones.includes(rac.J.tail4)),
     hasRaccoonEyelids: () => rac.eyelids.length > 0,
+    hasRaccoonExpressions: () => rac.expressions.length > 0,
     renderStats: () => ({ ...view.renderer.info.render, ...view.renderer.info.memory }),
     get frames() { return frames; },
     run(v) { running = v; last = performance.now(); lag = 0; },

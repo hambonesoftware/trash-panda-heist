@@ -27,4 +27,4 @@ The **Raccoon · studio** scene in [midnight.blend](../../art/midnight.blend) op
 - See how the mask and coat read under the alley lighting at the same camera angle. [In-game before and after](raccoon-before-after.jpg)
 - Check silhouette and deformation at gameplay scale. [Climbing](13-ladder.jpg) · [Slingshot](02-windup.jpg) · [Phone landscape](40-phone-landscape.jpg)
 
-The eyelids cover a few frequent gameplay reactions. In close shots, the far eye can still catch a small highlight along the silhouette. Independent brow and muzzle controls would give the character a wider range of asymmetric expressions. The upright pose also leaves room for a more animal stance with bent hocks and a lower center of gravity.
+The idle pose lowers the hips, bends the hocks, and pitches the shoulders forward. Aiming lowers the brow and tenses the muzzle. Hits and falls can raise the brow. The head, whiskers, and browser face groom share the same expression field. The controls are symmetric, and the far eye can still catch a small highlight in close shots. [In-game aiming pose](raccoon-aim.jpg)

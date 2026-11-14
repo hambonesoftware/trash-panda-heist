@@ -140,6 +140,7 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
   await check('Blender glTF sockets loaded for gameplay', async () => {
     assert(await page.evaluate(() => TPH.artReady() && TPH.hasRaccoonSkin() && TPH.hasRaccoonGroom() && TPH.hasRaccoonEyelids()),
       'missing authored sockets, raccoon skin binding, skinned fur, or eyelid shapes');
+    assert(await page.evaluate(() => TPH.hasRaccoonExpressions()), 'missing brow or muzzle shapes');
   });
   await check('Play button starts level 1', async () => {
     await page.click('button[data-act=play]');
