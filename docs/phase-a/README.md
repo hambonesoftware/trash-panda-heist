@@ -27,3 +27,5 @@ Each pair shows upstream main at `b90e2b2` on the left and the Phase A branch on
 | Mobile | [Phone landscape](40-phone-landscape.jpg) |
 
 Run `npm run build` for syntax, maze, desktop, touch, and ten-game autoplay checks. Run `node test/shots.mjs` for the storyboard and local frame-time samples. The browser test uses Chromium with SwiftShader. iPhone and iPad Safari performance still needs physical-device validation. The stage-specific art pass here covers Midnight Snack.
+
+The completed Phase A autoplay run finished all ten games and won seven. Upstream won six with the same seeds, and both results fall below the existing eight-win gate. Browser UI runs also showed timing failures under software rendering. The final storyboard sampled about 778 ms per frame at desktop quality 2 and 603 ms at emulated phone quality 0. The phone sample reported 320 draw calls and 192,332 triangles. These measurements characterize this software-rendered test setup.

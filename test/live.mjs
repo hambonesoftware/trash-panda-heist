@@ -33,12 +33,19 @@ await page.waitForFunction(() => window.TPH.info().hide > 0.9, null, { timeout: 
 await page.keyboard.up('Space');
 await page.waitForFunction(() => window.TPH.info().hide < 0.05, null, { timeout: 5000 });
 // leave the slingshot, run to the first can and dig (guards sent away so the check is repeatable)
-await page.evaluate(() => window.TPH.guardsOff());
+await page.evaluate(() => { window.TPH.guardsOff(); window.TPH.run(false); });
 await page.keyboard.down('KeyA');
-await page.waitForFunction(() => window.TPH.info().where === 'roam' && window.TPH.info().x < -215, null, { timeout: 15000 });
+await page.evaluate(() => {
+  const T = window.TPH;
+  for (let i = 0; i < 180 && T.info().x > -250; i++) T.step(1 / 60);
+  if (T.info().where !== 'roam' || Math.abs(T.info().x + 250) > 10) {
+    throw new Error('Keyboard movement did not reach the first can');
+  }
+});
 await page.keyboard.up('KeyA');
-await page.waitForFunction(() => window.TPH.info().sack >= 1, null, { timeout: 15000 });
+await page.evaluate(() => window.TPH.step(2));
 const info = await page.evaluate(() => window.TPH.info());
+if (!info.sack) throw new Error('Rummaging did not collect trash');
 console.log(JSON.stringify({ url, throws: info.throws, state: info.state, where: info.where, sack: info.sack, hearts: info.hearts, hour: info.hour, errors }));
 await browser.close();
 process.exit(errors.length ? 1 : 0);
