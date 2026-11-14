@@ -214,26 +214,28 @@ def finish():
 
 def raccoon():
     socket("raccoon.head")
-    loft([(-18, 16, 0, 4, 5), (-15, 17, 0, 13, 16),
-          (-6, 18, 0, 19, 22), (6, 18, 0, 20, 24),
-          (15, 17, 0, 18, 22), (23, 16, 0, 14, 17),
-          (29, 13, 0, 8, 11), (33, 12, 0, 4, 5)], fur, 24, "x")
+    # Wider cheekbones, a high forehead and a short tapered muzzle.
+    loft([(-19, 17, 0, 2, 3), (-17, 18, 0, 11, 14),
+          (-10, 19, 0, 17, 21), (0, 19, 0, 20, 24),
+          (10, 18, 0, 20, 25), (19, 17, 0, 17, 22),
+          (27, 15, 0, 12, 16), (31, 13, 0, 7, 10)], fur, 32, "x")
     for side in (-1, 1):
-        # Swept cheek tufts, high mask edges and eyelids define the profile.
-        for i in range(3):
-            loft([(-18 - i * 2, 9 + i * 4, side * (19 + i), .2, .2),
-                  (-7, 11 + i * 4, side * 19, 4.5, 5.5),
-                  (10, 12 + i * 3, side * 17, 4, 5),
-                  (19, 13 + i, side * 13, .5, 1)], cream, 12, "x")
-        oval((17, 20, side * 14), (12, 7.7, 7.7), mask, .29)
-        oval((19, 29, side * 13), (7.3, 2.5, 4.1), silver, .23)
-    oval((28, 10, 0), (12, 7, 11), cream, -.10)
-    oval((27, 5.8, 0), (8, 3, 7.8), stripe)
-    oval((38.5, 12.4, 0), (4.8, 3.7, 5.6), nose, -.13, taper=.38)
-    oval((41, 14.3, 2.5), (1.4, .65, 1.4), glint)
+        loft([(-22, 14, side * 22, .3, .4), (-15, 13, side * 22, 4.6, 4.8),
+              (-5, 12, side * 21, 6.3, 6.6), (8, 12, side * 19, 6, 6),
+              (19, 13, side * 14, 4, 4), (27, 12, side * 9, 2, 2)], cream, 20, "x")
+        loft([(-22, 21, side * 22, .2, .3), (-13, 20, side * 22, 3.9, 4.8),
+              (0, 19, side * 21, 5.4, 5.8), (13, 19, side * 18, 4, 4.8)],
+             silver, 16, "x")
+        oval((15.5, 21, side * 18), (13.5, 7.9, 6.7), mask, -.24, sides=24)
+        oval((16, 29, side * 17), (8.8, 2.1, 3.8), silver, .17)
+    oval((28, 10.7, 0), (10.7, 6.4, 11.1), cream, -.12, sides=24)
+    oval((37, 12.5, 0), (4.4, 3.4, 5.9), nose, -.17, sides=24, taper=.45)
+    oval((39, 14.6, 2.7), (1.45, .58, 1.27), glint)
     for side in (-1, 1):
-        for x, y, z in ((32, 10, 8.8), (29.8, 11.7, 10), (32.9, 8, 8.2)):
-            oval((x, y, z * side), (.64, .64, .64), stripe, sides=8, rows=5)
+        path([(35, 8.5, side * 7), (32, 7.4, side * 9),
+              (28, 7.9, side * 10.6), (25, 9.3, side * 10.6)], .55, stripe)
+        for x, y, z in ((32, 11.2, 9.4), (29.8, 12.5, 10.7), (31.7, 9.7, 10)):
+            oval((x, y, z * side), (.5, .49, .5), stripe, sides=8, rows=5)
     finish()
 
     socket("raccoon.eyes")
@@ -291,14 +293,58 @@ def raccoon():
                 oval((x + length * .63, y - 1, z), (3.6, 2.4, 2.2), stripe)
                 oval((x + length * .9, y - .55, z), (1.4, .95, .75), silver, sides=8)
             finish()
-    offsets = [(-11, 7), (-8, 10), (-3, 11), (2, 10), (4, 12)]
-    widths = [8.5, 11, 13, 12, 9]
-    for i, ((x, y), width) in enumerate(zip(offsets, widths)):
-        socket(f"raccoon.tail{i}")
-        # Overlapping tapered segments keep stripes closed through the full wag.
-        oval((x * .5, y * .5, 0), (width * .92, width + 1.7, width),
-             [fur, stripe, silver, stripe, mask][i], -math.atan2(x, y), taper=-.14)
-        finish()
+def build_tail(rig, pivots):
+    """Sweep one continuous profile and skin it along the five tail joints."""
+    points = [pivots[f"tail{i}"] for i in range(5)]
+    points.append(points[-1] + Vector(xyz((7, 15, 0))))
+    widths = [6.4, 10.7, 13.2, 12.6, 9, .4]
+    bands = [fur, stripe, silver, stripe, mask]
+    sides, steps = 20, 5
+    vertices, faces = [], []
+    for ring in range(steps * 5 + 1):
+        segment = min(ring // steps, 4)
+        t = ring / steps - segment
+        a, b = points[segment:segment + 2]
+        p0, p3 = points[max(0, segment - 1)], points[min(segment + 2, 5)]
+        m0, m1 = (b - p0) * .5, (p3 - a) * .5
+        center = (2*t**3 - 3*t*t + 1)*a + (t**3 - 2*t*t + t)*m0
+        center += (-2*t**3 + 3*t*t)*b + (t**3 - t*t)*m1
+        tangent = ((6*t*t - 6*t)*(a-b) + (3*t*t - 4*t + 1)*m0 + (3*t*t - 2*t)*m1).normalized()
+        lateral = Vector((0, 1, 0))
+        up = tangent.cross(lateral)
+        radius = widths[segment] + (widths[segment + 1] - widths[segment]) * t*t*(3-2*t)
+        for i in range(sides):
+            angle = math.tau * i / sides
+            v = center + radius * (lateral * math.cos(angle) + up * math.sin(angle) * .88)
+            vertices.append(tuple(v))
+    faces.append(tuple(reversed(range(sides))))
+    for ring in range(steps * 5):
+        for i in range(sides):
+            a = ring * sides + i
+            b = ring * sides + (i + 1) % sides
+            faces.append((a, b, b + sides, a + sides))
+    faces.append(tuple(range(len(vertices)-sides, len(vertices))))
+    mesh = bpy.data.meshes.new("Swept striped tail")
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    tail = bpy.data.objects.new("Continuous striped tail", mesh)
+    assets.objects.link(tail)
+    tail.parent = rig
+    for mat in bands:
+        mesh.materials.append(mat)
+    for face in mesh.polygons:
+        face.material_index = min(4, max(0, (face.index-1)//(sides*steps)))
+        face.use_smooth = True
+    groups = [tail.vertex_groups.new(name=f"skin_tail{i}") for i in range(5)]
+    for ring in range(steps * 5 + 1):
+        i = min(ring // steps, 4)
+        t = ring / steps - i if i < 4 else 0
+        ids = list(range(ring * sides, (ring + 1) * sides))
+        groups[i].add(ids, 1-t, "REPLACE")
+        if t:
+            groups[i+1].add(ids, t, "REPLACE")
+    modifier = tail.modifiers.new("Tail deformation", "ARMATURE")
+    modifier.object = rig
 
 
 def skin_raccoon():
@@ -316,13 +362,20 @@ def skin_raccoon():
             "shin"+side: ("thigh"+side, (0, -21, 0)),
             "foot"+side: ("shin"+side, (0, -20, 0)),
         })
+    body_joints = tuple(joint_layout)
+    parent = "hips"
+    for i, offset in enumerate(((-15,-2,0),(-11,7,0),(-8,10,0),(-3,11,0),(2,10,0))):
+        name = f"tail{i}"
+        joint_layout[name] = (parent, offset)
+        parent = name
     pivots = {}
     for name, (parent, offset) in joint_layout.items():
         pivots[name] = pivots.get(parent, Vector()) + Vector(xyz(offset))
 
     socket("raccoon.body")
     shells = []
-    for name, pivot in pivots.items():
+    for name in body_joints:
+        pivot = pivots[name]
         attachment = bpy.data.objects["raccoon." + name]
         for part in list(attachment.children):
             mat = part.data.materials[0]
@@ -359,7 +412,8 @@ def skin_raccoon():
         "thigh": (0, -18, 0), "shin": (0, -18, 0), "foot": (12, 4, 0),
     }
     segments = {}
-    for name, point in pivots.items():
+    for name in body_joints:
+        point = pivots[name]
         key = name if name in endpoints else name[:-1]
         segments[name] = (point, Vector(xyz(endpoints[key])))
 
@@ -382,21 +436,27 @@ def skin_raccoon():
         if parent:
             bone.parent = armature.edit_bones["skin_" + parent]
     bpy.ops.object.mode_set(mode="OBJECT")
-    groups = {name: body.vertex_groups.new(name="skin_" + name) for name in pivots}
+    groups = {name: body.vertex_groups.new(name="skin_" + name) for name in body_joints}
     body.data.materials.clear()
     body.data.materials.append(fur)
     body.data.materials.append(mask)
     for vertex in body.data.vertices:
-        ranked = sorted((distance(vertex.co, name), name) for name in pivots)[:3]
+        ranked = sorted((distance(vertex.co, name), name) for name in body_joints)[:3]
         weights = [math.exp(-(d - ranked[0][0]) / 2.3) for d, _ in ranked]
         for weight, (_, name) in zip(weights, ranked):
             groups[name].add([vertex.index], weight / sum(weights), "REPLACE")
     for face in body.data.polygons:
-        nearest = min(pivots, key=lambda name: distance(face.center, name))
+        nearest = min(body_joints, key=lambda name: distance(face.center, name))
         face.material_index = int(nearest.startswith(("hand", "foot", "shin")))
         face.use_smooth = True
     modifier = body.modifiers.new("Raccoon skin deformation", "ARMATURE")
     modifier.object = rig
+    build_tail(rig, pivots)
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.cube_project()
+    bpy.ops.object.mode_set(mode="OBJECT")
 
 
 def worker():
