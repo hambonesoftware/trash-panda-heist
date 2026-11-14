@@ -16,7 +16,7 @@ await page.evaluate(() => window.TPH.seed(61));
 const shot = async (name, script, target = page) => {
   await target.evaluate(`window.TPH.run(false); ${script}; window.TPH.step(1 / 60);`);
   await target.evaluate(() => new Promise(r => { window.TPH.run(true); requestAnimationFrame(() => requestAnimationFrame(() => { window.TPH.run(false); r(); })); }));
-  await target.screenshot({ path: path.join(OUT, name + '.png') });
+  await target.screenshot({ path: path.join(OUT, name + '.png'), timeout: 90000 });
   console.log('saved', name);
 };
 await shot('01-wide', 'TPH.start(0); TPH.step(1)');
