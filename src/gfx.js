@@ -136,6 +136,7 @@ export function createView(canvas) {
   };
 
   v.applyQuality = () => {
+    renderer.shadowMap.enabled = v.quality > 0;
     const dpr = window.devicePixelRatio || 1;
     const pr = v.quality >= 2 ? Math.min(dpr, 2) : v.quality === 1 ? Math.min(dpr, 1.5) : Math.min(dpr, 1);
     renderer.setPixelRatio(pr);

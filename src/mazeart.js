@@ -133,11 +133,12 @@ function tenementWall(group, W, S, facade) {
   W.windowMats = [litMat];
   W.roomMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 1.2, 0.85), toneMapped: false });
   W.windows = [];
+  const windowFrames = facade ? new THREE.Group() : group;
   let n = 0;
   for (const y of [150, 410, 670]) for (let x = -1560; x <= -240; x += S.step) {
     if (Math.abs(x + 168) < 40) continue;
     const kind = (n++ * 7 + (y > 400 ? 3 : 0)) % 5;
-    const e = WINDOW[S.win](group, S, x, y);
+    const e = WINDOW[S.win](windowFrames, S, x, y);
     const pane = e.mk(kind === 0 || kind === 3 ? litMat : kind === 1 ? W.tvMat : dark);
     pane.position.set(x, y, -65.5);
     group.add(pane);

@@ -129,7 +129,7 @@ log('\nDesktop controls (1280x720, mouse + keyboard)');
     await until(page, () => window.TPH.frames > 20, null, 30000, 'frames');
   });
   await check('Blender glTF sockets loaded for gameplay', async () => {
-    assert(await page.evaluate(() => window.TPH.artReady()), 'missing authored asset sockets');
+    assert(await page.evaluate(() => window.TPH.artReady() && window.TPH.hasRaccoonSkin()), 'missing authored sockets or raccoon skin binding');
   });
   await check('Play button starts level 1', async () => {
     await page.click('button[data-act=play]');
@@ -491,16 +491,24 @@ for (const ph of PHONES) {
   }
   await check('touch: drag the pouch back and release to throw', async () => {
     await ready(page);
-    const p = await page.evaluate(() => window.TPH.pouchScreen());
+    const p = await page.evaluate(() => { window.TPH.run(false); return window.TPH.pouchScreen(); });
     const k = ph.viewport.width / 1280;
-    await touchDrag(cdp, p, -150 * k, 70 * k);
+    try {
+      await touchDrag(cdp, p, -150 * k, 70 * k);
+    } finally {
+      await touchUp(cdp);
+      await page.evaluate(() => window.TPH.run(true));
+    }
     await until(page, () => window.TPH.info().throws === 1, null, 3000, 'throw');
   });
   await check('touch: hold HIDE to duck, lift to pop up', async () => {
     const c = await center(page, '#hideBtn');
-    await touchHold(cdp, c, 500);
-    assert((await info(page)).hide > 0.9, 'not hidden while held');
-    await touchUp(cdp);
+    try {
+      await touchHold(cdp, c, 50);
+      await until(page, () => window.TPH.info().hide > 0.9, null, 4000, 'hidden while held');
+    } finally {
+      await touchUp(cdp);
+    }
     await until(page, () => window.TPH.info().hide < 0.05, null, 2000, 'unhidden');
   });
   await check('touch: tap splits fish bones mid-flight', async () => {

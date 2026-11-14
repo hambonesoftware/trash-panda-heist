@@ -3,7 +3,7 @@ import { M, RB, SP, CY, CA, CO, ell, put, toon, glowMat, RoundedBoxGeometry } fr
 import { joint, Rig, clip } from './rig.js';
 import { rand, rng, lerp } from './util.js';
 import { SPEC } from './config.js';
-import { artMesh, replaceJointArt } from './art.js';
+import { artMesh, replaceJointArt, skinRaccoon } from './art.js';
 
 const P = (base, o) => ({ ...base, ...o });
 
@@ -215,6 +215,7 @@ export function buildRaccoon() {
     J['tail' + i].add(put(ell(tailR[i], 1, 1.05, 0.95, i % 2 ? DARK : i === 4 ? FUR2 : FUR), nxt[0] * 0.5, nxt[1] * 0.5, 0));
   }
 
+  skinRaccoon(root, J);
   replaceJointArt('raccoon', { ...J, eyes });
   const sling = buildSlingshot();
   sling.group.position.set(36, 76, 22);

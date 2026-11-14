@@ -23,10 +23,18 @@ await shot('01-wide', 'TPH.start(0); TPH.step(1)');
 await shot('02-windup', 'TPH.start(0); TPH.toPerch(); TPH.setStash(["can", "can", "can"]); TPH.step(1); TPH.aim(-85, -45); TPH.step(0.3); TPH.closeUp(300, 100, 760)');
 await shot('03-release', 'TPH.release(); TPH.step(0.06)');
 await shot('03b-impact', `
-  TPH.start(0); TPH.toPerch(); TPH.setStash(["melon"]); TPH.step(1);
-  const before = TPH.info().boxes;
-  TPH.fireDrag(-75, -42);
-  for (let frame = 0; frame < 180 && TPH.info().boxes >= before; frame++) TPH.step(1 / 60);
+  let brokeBox = false;
+  for (const [dx, dy] of [[-90,-65],[-90,-85],[-75,-90],[-70,-100],[-95,-45],[-60,-95]]) {
+    TPH.start(0); TPH.toPerch(); TPH.setStash(["melon"]); TPH.step(1);
+    const before = TPH.info().boxes;
+    TPH.fireDrag(dx, dy);
+    for (let frame = 0; frame < 180; frame++) {
+      TPH.step(1 / 60);
+      if (TPH.info().boxes < before) { brokeBox = true; break; }
+    }
+    if (brokeBox) break;
+  }
+  if (!brokeBox) throw new Error("Impact fixture did not destroy a box");
   TPH.closeUp(930, 170, 1050);
 `);
 await shot('04-hidden', 'TPH.closeUp(0); TPH.start(0); TPH.toPerch(); TPH.hide(true); TPH.step(1); TPH.closeUp(240, 110, 760)');
@@ -52,11 +60,15 @@ await shot('35-dusk', 'TPH.start(3); TPH.step(1)');
 const phone = await browser.newPage({
   viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1,
 });
-await phone.goto(`http://127.0.0.1:${srv.address().port}/?test&q=0`);
+await phone.goto(`http://127.0.0.1:${srv.address().port}/?test&q=0`, {
+  waitUntil: 'domcontentloaded', timeout: 90000,
+});
 await phone.waitForFunction(() => window.TPH?.ready, null, { timeout: 90000 });
 await phone.evaluate(() => window.TPH.seed(61));
 await shot('40-phone-landscape', 'TPH.start(0); TPH.guardsOff(); TPH.warp(-1050, "g"); TPH.step(1)', phone);
+await page.bringToFront();
 for (const [label, target] of [['desktop', page], ['phone landscape', phone]]) {
+  await target.bringToFront();
   const profile = await target.evaluate(async () => {
     const T = window.TPH;
     T.start(0); T.guardsOff(); T.warp(-1050, 'g'); T.closeUp(-1050, 160, 1250); T.step(1);

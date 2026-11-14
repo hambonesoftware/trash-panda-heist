@@ -20,15 +20,16 @@ export async function loadArt() {
   }
 }
 
+const socketName = name => THREE.PropertyBinding.sanitizeNodeName(name);
+
 export function artMesh(name) {
-  // GLTFLoader strips punctuation from node names for animation binding.
-  return sockets.get(name.replaceAll('.', ''))?.clone() ?? null;
+  return sockets.get(socketName(name))?.clone() ?? null;
 }
 
 export function artReady() {
-  return ['raccoon.head', 'worker.head', 'facade', 'fire-escape', 'dumpster',
+  return ['raccoon.head', 'raccoon.body', 'worker.head', 'facade', 'fire-escape', 'dumpster',
     'dumpster-lid', 'slingshot', 'crate', 'carton', 'ammo-can', 'ammo-bottle', 'ammo-bag']
-    .every(name => sockets.has(name.replaceAll('.', '')));
+    .every(name => sockets.has(socketName(name)));
 }
 
 export function replaceJointArt(prefix, joints) {
@@ -39,6 +40,35 @@ export function replaceJointArt(prefix, joints) {
       if (child.isMesh) joint.remove(child);
     }
     joint.add(mesh);
+  }
+}
+
+export function skinRaccoon(root, joints) {
+  const body = artMesh('raccoon.body');
+  if (!body) return;
+  // Rebind cloned skinned meshes to the existing AnimationMixer joints.
+  const skinMeshes = [];
+  body.traverse(mesh => { if (mesh.isSkinnedMesh) skinMeshes.push(mesh); });
+  if (!skinMeshes.length) return;
+  const names = new Set(skinMeshes[0].skeleton.bones.map(bone => bone.name.slice(5)));
+  for (const name of names) {
+    for (const child of joints[name].children.slice()) {
+      if (child.isMesh) joints[name].remove(child);
+    }
+  }
+  // GLTFLoader splits the material primitives into separate meshes. Bind all
+  // of them in the unposed coordinate system, before clips start playing.
+  root.updateWorldMatrix(true, true);
+  for (const mesh of skinMeshes) {
+    const bones = mesh.skeleton.bones.map(bone => joints[bone.name.slice(5)]);
+    mesh.removeFromParent();
+    mesh.position.set(0, 0, 0);
+    mesh.quaternion.identity();
+    mesh.scale.setScalar(1);
+    mesh.frustumCulled = false;
+    root.add(mesh);
+    mesh.updateWorldMatrix(true, false);
+    mesh.bind(new THREE.Skeleton(bones), mesh.matrixWorld);
   }
 }
 

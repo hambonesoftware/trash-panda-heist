@@ -9,6 +9,7 @@ import random
 from pathlib import Path
 
 import bpy
+import bmesh
 from mathutils import Vector
 
 
@@ -116,17 +117,20 @@ def add(obj, mat, smooth=False):
 
 
 def box(center, dims, radius, mat, roll=0):
-    bpy.ops.mesh.primitive_cube_add(size=1, location=xyz(center))
-    o = bpy.context.object
-    o.dimensions = tuple(abs(v) for v in xyz(dims))
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    mesh = bpy.data.meshes.new("Beveled panel")
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1)
+    scales = tuple(abs(v) for v in xyz(dims))
+    for vertex in bm.verts:
+        for axis, scale in enumerate(scales):
+            vertex.co[axis] *= scale
     if radius:
-        bevel = o.modifiers.new("Soft machined edges", "BEVEL")
-        bevel.width = radius
-        bevel.segments = 2
-        bpy.ops.object.modifier_apply(modifier=bevel.name)
-        normals = o.modifiers.new("Weighted corner normals", "WEIGHTED_NORMAL")
-        bpy.ops.object.modifier_apply(modifier=normals.name)
+        bmesh.ops.bevel(bm, geom=list(bm.edges), offset=radius, segments=2,
+                        affect="EDGES", clamp_overlap=True)
+    bm.to_mesh(mesh)
+    bm.free()
+    o = bpy.data.objects.new("Beveled panel", mesh)
+    o.location = xyz(center)
     o.rotation_euler.y = -roll
     return add(o, mat)
 
@@ -234,10 +238,10 @@ def raccoon():
 
     socket("raccoon.eyes")
     for side in (-1, 1):
-        oval((-.5, 0, side * 10.5), (5.3, 5.8, 5), white)
-        oval((3.4, .1, side * 12.4), (2.4, 4, 3.5), iris)
-        oval((4.6, .2, side * 12.9), (1.6, 2.9, 2.7), nose)
-        oval((5.8, 1.9, side * 13.8), (.67, 1, .8), glint, sides=8)
+        oval((.3, 1, side * 18.2), (5.3, 5.8, 5), white)
+        oval((3.7, 1.1, side * 21.5), (2.5, 4, 2.6), iris)
+        oval((4.7, 1.2, side * 22.7), (1.7, 2.9, 1.6), nose)
+        oval((5.3, 2.9, side * 23.8), (.7, .9, .6), glint, sides=8)
     finish()
 
     for name in ("earL", "earR"):
@@ -295,6 +299,104 @@ def raccoon():
         oval((x * .5, y * .5, 0), (width * .92, width + 1.7, width),
              [fur, stripe, silver, stripe, mask][i], -math.atan2(x, y), taper=-.14)
         finish()
+
+
+def skin_raccoon():
+    """Fuse body volumes, then weight the continuous surface to the game joints."""
+    joint_layout = {
+        "hips": (None, (0, 44, 0)), "spine": ("hips", (0, 9, 0)),
+        "chest": ("spine", (1, 19, 0)),
+    }
+    for side, z in (("R", 15), ("L", -15)):
+        joint_layout.update({
+            "uarm"+side: ("chest", (2, 13, z)),
+            "farm"+side: ("uarm"+side, (0, -22, 0)),
+            "hand"+side: ("farm"+side, (0, -21, 0)),
+            "thigh"+side: ("hips", (2, -3, z * .67)),
+            "shin"+side: ("thigh"+side, (0, -21, 0)),
+            "foot"+side: ("shin"+side, (0, -20, 0)),
+        })
+    pivots = {}
+    for name, (parent, offset) in joint_layout.items():
+        pivots[name] = pivots.get(parent, Vector()) + Vector(xyz(offset))
+
+    socket("raccoon.body")
+    shells = []
+    for name, pivot in pivots.items():
+        attachment = bpy.data.objects["raccoon." + name]
+        for part in list(attachment.children):
+            mat = part.data.materials[0]
+            if mat not in (fur, stripe, mask):
+                continue
+            # Keep the small knuckle accents as overlays. Fuse the main paw volume.
+            if name.startswith(("hand", "foot")) and mat != mask:
+                continue
+            part.parent = root
+            part.location += pivot
+            shells.append(part)
+    bpy.ops.object.select_all(action="DESELECT")
+    for shell in shells:
+        shell.select_set(True)
+    body = shells[0]
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.join()
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    body.name = "Continuous raccoon body"
+    body.data.remesh_voxel_size = 1.65
+    bpy.ops.object.voxel_remesh()
+    smooth = body.modifiers.new("Blend shoulders and limb transitions", "SMOOTH")
+    smooth.factor = .8
+    smooth.iterations = 6
+    bpy.ops.object.modifier_apply(modifier=smooth.name)
+    decimate = body.modifiers.new("Mobile silhouette budget", "DECIMATE")
+    decimate.ratio = .46
+    bpy.ops.object.modifier_apply(modifier=decimate.name)
+
+    # Short centerline samples keep the weights local across close-set limbs.
+    endpoints = {
+        "hips": (0, 5, 0), "spine": (2, 16, 0), "chest": (2, 15, 0),
+        "uarm": (0, -20, 0), "farm": (0, -19, 0), "hand": (5, -5, 0),
+        "thigh": (0, -18, 0), "shin": (0, -18, 0), "foot": (12, 4, 0),
+    }
+    segments = {}
+    for name, point in pivots.items():
+        key = name if name in endpoints else name[:-1]
+        segments[name] = (point, Vector(xyz(endpoints[key])))
+
+    def distance(point, name):
+        origin, direction = segments[name]
+        t = max(0, min(1, (point - origin).dot(direction) / direction.length_squared))
+        return (point - origin - t * direction).length
+
+    armature = bpy.data.armatures.new("Raccoon deformation skeleton")
+    rig = bpy.data.objects.new("Raccoon deformation skeleton", armature)
+    assets.objects.link(rig)
+    rig.parent = root
+    body.parent = rig
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="EDIT")
+    for name, (parent, _) in joint_layout.items():
+        bone = armature.edit_bones.new("skin_" + name)
+        bone.head = pivots[name]
+        bone.tail = bone.head + Vector((0, 0, 8))
+        if parent:
+            bone.parent = armature.edit_bones["skin_" + parent]
+    bpy.ops.object.mode_set(mode="OBJECT")
+    groups = {name: body.vertex_groups.new(name="skin_" + name) for name in pivots}
+    body.data.materials.clear()
+    body.data.materials.append(fur)
+    body.data.materials.append(mask)
+    for vertex in body.data.vertices:
+        ranked = sorted((distance(vertex.co, name), name) for name in pivots)[:3]
+        weights = [math.exp(-(d - ranked[0][0]) / 2.3) for d, _ in ranked]
+        for weight, (_, name) in zip(weights, ranked):
+            groups[name].add([vertex.index], weight / sum(weights), "REPLACE")
+    for face in body.data.polygons:
+        nearest = min(pivots, key=lambda name: distance(face.center, name))
+        face.material_index = int(nearest.startswith(("hand", "foot", "shin")))
+        face.use_smooth = True
+    modifier = body.modifiers.new("Raccoon skin deformation", "ARMATURE")
+    modifier.object = rig
 
 
 def worker():
@@ -369,14 +471,22 @@ def worker():
 def scenery():
     socket("facade")
     box((0, 400, -26), (1500, 800, 48), 6, mortar)
+    courses = {mat: ([], []) for mat in brick}
     for row in range(34):
         for col in range(29):
             x = -744 + col * 53 + (row % 2) * 26.5
             left, right = max(-750, x - 25), min(750, x + 25)
             if right - left < 3:
                 continue
-            box(((left + right) / 2, 11 + row * 23, -1.5), (right - left, 20.5, 5),
-                0, random.choice(brick))
+            vertices, faces = courses[random.choice(brick)]
+            low, high = .75 + row * 23, 21.25 + row * 23
+            base = len(vertices)
+            vertices.extend([(left, low, 1), (right, low, 1), (right, high, 1), (left, high, 1),
+                             (left, low, -2), (right, low, -2), (right, high, -2), (left, high, -2)])
+            for face in ((0, 1, 2, 3), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)):
+                faces.append(tuple(base + i for i in face))
+    for mat, (vertices, faces) in courses.items():
+        surface("Brick courses", vertices, faces, mat, smooth=False)
     for y, w, h, d in ((10, 1508, 19, 24), (790, 1514, 15, 26),
                        (809, 1540, 23, 68), (782, 1520, 10, 38)):
         box((0, y, 0), (w, h, d), 3, stone)
@@ -496,6 +606,7 @@ def props():
 
 
 raccoon()
+skin_raccoon()
 worker()
 scenery()
 props()
@@ -503,18 +614,21 @@ props()
 # Export one mesh per socket with material primitives. Copies of the glTF
 # sockets in Three.js can share both geometry and materials.
 for asset in [obj for obj in assets.objects if obj.type == "EMPTY"]:
+    if asset.name == "raccoon.body" or not asset.children:
+        continue
     bpy.ops.object.select_all(action="DESELECT")
     for child in asset.children:
         child.select_set(True)
     bpy.context.view_layer.objects.active = asset.children[0]
-    bpy.ops.object.join()
+    if len(asset.children) > 1:
+        bpy.ops.object.join()
     mesh = bpy.context.object
     mesh.name = asset.name + ".mesh"
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.mesh.normals_make_consistent(inside=False)
-    bpy.ops.uv.smart_project(island_margin=.01)
+    bpy.ops.uv.cube_project()
     bpy.ops.object.mode_set(mode="OBJECT")
 
 target = ROOT / "assets"

@@ -1515,6 +1515,7 @@ if (TEST) {
   window.TPH = {
     ready: true,
     artReady,
+    hasRaccoonSkin: () => rac.root.children.some(mesh => mesh.isSkinnedMesh && mesh.skeleton.bones.includes(rac.J.chest)),
     renderStats: () => ({ ...view.renderer.info.render, ...view.renderer.info.memory }),
     get frames() { return frames; },
     run(v) { running = v; last = performance.now(); lag = 0; },
