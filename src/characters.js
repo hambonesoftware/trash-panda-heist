@@ -19,6 +19,13 @@ function stick(a, b, r1, r2, color, t = 1.6) {
 const RC = { FUR: 0x8f99b2, FUR2: 0x6f7891, DARK: 0x2b2d3d, LIGHT: 0xf2ecdd, BAND: 0xe04b3c, NOSE: 0x15121b };
 
 export const R_STAND = {
+  '@hips': [0, -1, 0], hips: [0, 0, 0], spine: [0, 0, -4], chest: [0, 0, -5], neck: [0, 0, 3], head: [0, 0, 4],
+  earL: [-16, 0, 0], earR: [16, 0, 0],
+  uarmR: [0, 0, 25], farmR: [0, 0, 35], uarmL: [0, 0, 45], farmL: [0, 0, 35],
+  thighR: [0, 0, 8], shinR: [0, 0, -14], footR: [0, 0, 6], thighL: [0, 0, -6], shinL: [0, 0, -10], footL: [0, 0, 16],
+  tail0: [0, 0, 22], tail1: [0, 0, -8], tail2: [0, 0, -12], tail3: [0, 0, -12], tail4: [0, 0, -8],
+};
+const R_PROWL = {
   '@hips': [-2, -5, 0], hips: [0, 0, 0], spine: [0, 0, -10], chest: [0, 0, -8], neck: [0, 0, 6], head: [0, 0, 9],
   earL: [-16, 0, 0], earR: [16, 0, 0],
   uarmR: [0, 0, 25], farmR: [0, 0, 35], uarmL: [0, 0, 45], farmL: [0, 0, 35],
@@ -58,8 +65,13 @@ function raccoonClips(rig) {
   const S = R_STAND, W = P(S, R_WINDUP);
   rig.add(clip('idle', [
     [0, S],
-    [1.3, P(S, { '@hips': [-2, -6.2, 0], chest: [0, 0, -10], head: [0, 5, 11], earR: [16, 0, -14], tail0: [0, 0, 28], tail1: [0, 0, -2], tail2: [0, 0, -6], '^chest': [1, 1.03, 1.04] })],
+    [1.3, P(S, { '@hips': [0, -2.2, 0], chest: [0, 0, -7], neck: [0, 0, 1], head: [0, 5, 8], earR: [16, 0, -14], tail0: [0, 0, 28], tail1: [0, 0, -2], tail2: [0, 0, -6], '^chest': [1, 1.03, 1.04] })],
     [2.6, S],
+  ], rig));
+  rig.add(clip('prowlIdle', [
+    [0, R_PROWL],
+    [1.3, P(R_PROWL, { '@hips': [-2, -6.2, 0], chest: [0, 0, -10], head: [0, 5, 11], earR: [16, 0, -14], tail0: [0, 0, 28], tail1: [0, 0, -2], tail2: [0, 0, -6], '^chest': [1, 1.03, 1.04] })],
+    [2.6, R_PROWL],
   ], rig));
   rig.add(clip('release', [
     [0, W],

@@ -1202,7 +1202,7 @@ function updateRaccoon(dt) {
     else if (ra.mode === 'fall') rig.play('fall', 0.08);
     else if (rumCan) { rig.play('rummage', 0.1); faceY = rumCan.x >= ra.x ? -0.5 : Math.PI + 0.5; z = 26; }
     else if (ra.moving) rig.play('run', 0.1, 1.15);
-    else rig.play('idle', 0.15);
+    else rig.play('prowlIdle', 0.15);
     rac.root.rotation.y = angleDamp(rac.root.rotation.y, faceY, 14, dt);
     g.position.set(ra.x, y, z);
     rig.update(dt);
